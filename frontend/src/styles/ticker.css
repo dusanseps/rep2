@@ -1,0 +1,385 @@
+/* ============================================================
+   ticker.css – štýly pre ticker a správcovský modal
+   ============================================================ */
+
+/* ===== TICKER BAR ===== */
+.demo-ticker {
+  position: fixed !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  z-index: 999 !important;
+  overflow: hidden;
+  height: 54px;
+  background: #0072c6;
+  display: flex;
+  align-items: center;
+  font: 600 17px/1.5 "Segoe UI", Arial, sans-serif;
+  color: #fff;
+  box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.18);
+  cursor: default;
+  padding-inline: 14px;
+  letter-spacing: 0.1px;
+}
+
+.demo-track {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  will-change: transform;
+  display: flex;
+  pointer-events: auto;
+}
+
+.demo-track a {
+  pointer-events: auto;
+  position: relative;
+  z-index: 1;
+}
+
+.loop {
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
+}
+
+.item {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.item a {
+  color: #fff;
+  text-decoration: underline;
+}
+
+.item::after {
+  content: " • ";
+  opacity: 0.9;
+  padding: 0 22px;
+  font-weight: 400;
+}
+
+/* Ticker bottom padding na body */
+.with-ticker-bottom {
+  padding-bottom: 64px !important;
+}
+
+/* ===== MODAL ===== */
+.dt-modal {
+  position: fixed;
+  inset: 0;
+  display: none;
+  z-index: 9999;
+}
+
+.dt-modal[aria-hidden="false"] {
+  display: block;
+}
+
+.dt-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(20, 25, 30, 0.45);
+  backdrop-filter: blur(2px);
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+.dt-modal[aria-hidden="false"] .dt-backdrop {
+  opacity: 1;
+}
+
+.dt-dialog {
+  position: relative;
+  margin: 6vh auto 0 auto;
+  width: min(980px, 96vw);
+  max-height: 88vh;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.25);
+  overflow: clip;
+  display: flex;
+  flex-direction: column;
+  transform: translateY(16px);
+  opacity: 0;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.dt-modal[aria-hidden="false"] .dt-dialog {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+.dt-header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid #eef0f3;
+  background: #fafbff;
+}
+
+.dt-header h3 {
+  margin: 0;
+  font: 700 18px/1.2 "Segoe UI", Arial, sans-serif;
+}
+
+.dt-actions-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dt-search-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#dt-search {
+  border: 1px solid #dcdcdc;
+  border-radius: 10px;
+  padding: 8px 10px;
+  min-width: 220px;
+}
+
+.dt-body {
+  padding: 0;
+  overflow: auto;
+}
+
+.dt-two-col {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 0;
+}
+
+@media (max-width: 900px) {
+  .dt-two-col {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dt-two-col > .dt-panel:last-child {
+  background: #f9fafb;
+  border-left: 1px solid #eef0f3;
+}
+
+.dt-panel {
+  padding: 14px 16px;
+}
+
+.dt-list-head {
+  display: grid;
+  grid-template-columns: 1fr 140px 120px;
+  gap: 10px;
+  padding: 6px 8px;
+  font-weight: 600;
+  color: #444;
+}
+
+.dt-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.dt-card {
+  display: grid;
+  grid-template-columns: 1fr 140px 120px;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #eef0f3;
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: #fbfcfe;
+  transition: box-shadow 0.12s ease, transform 0.05s;
+}
+
+.dt-card:hover {
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.07);
+  transform: translateY(-1px);
+}
+
+.dt-title {
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.dt-sub {
+  color: #6b7280;
+  font-size: 12px;
+  display: block;
+  margin-top: 3px;
+}
+
+.dt-badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.badge {
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+
+.badge.ok   { background: #e7f6ec; color: #236e4a; border-color: #caeed8; }
+.badge.warn { background: #fff4e5; color: #8a5a01; border-color: #ffe1b8; }
+.badge.dead { background: #fde8e8; color: #8b1b1b; border-color: #f8caca; }
+.badge.link { background: #e8f0fe; color: #1a56db; border-color: #c7dcff; }
+.badge.area { background: #eef2ff; color: #3730a3; border-color: #c7d2fe; }
+
+/* ===== FORM ===== */
+.dt-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.dt-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+}
+
+.dt-row label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.dt-row input[type="text"],
+.dt-row input[type="number"] {
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  padding: 6px 8px;
+  font-size: 13px;
+  outline: none;
+  background: #f9fafb;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease, background-color 0.12s ease;
+}
+
+.dt-row input[type="text"]:focus,
+.dt-row input[type="number"]:focus {
+  border-color: #4f46e5;
+  background: #ffffff;
+  box-shadow: 0 0 0 1px rgba(79, 70, 229, 0.18);
+}
+
+.dt-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dt-chips {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.dt-chip {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid #dcdcdc;
+  background: #fff;
+  cursor: pointer;
+}
+
+.dt-help {
+  color: #6b7280;
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.dt-error {
+  color: #b00020;
+  font-size: 12px;
+  min-height: 16px;
+  margin-top: 2px;
+}
+
+.dt-preview {
+  border: 1px dashed #d1d5db;
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: #f9fafb;
+}
+
+.dt-preview-title {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #6b7280;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+#prev-text {
+  font-weight: 600;
+}
+
+.dt-form-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding-top: 4px;
+}
+
+/* ===== BUTTONS ===== */
+.dt-btn {
+  border: 1px solid #dcdcdc;
+  background: #f7f7f7;
+  padding: 8px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: filter 0.08s ease, transform 0.04s;
+}
+
+.dt-btn:hover   { filter: brightness(0.98); }
+.dt-btn:active  { transform: translateY(1px); }
+.dt-primary     { background: #4f46e5; color: #fff; border-color: #4f46e5; }
+.dt-danger      { background: #ffecec; border-color: #ffb4b4; color: #8b1b1b; }
+.dt-ghost       { background: transparent; border-color: transparent; }
+
+/* ===== TOAST ===== */
+.dt-toast {
+  position: fixed;
+  bottom: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: grid;
+  gap: 8px;
+  z-index: 10000;
+  pointer-events: none;
+}
+
+.toast {
+  background: #111827;
+  color: #fff;
+  padding: 10px 14px;
+  border-radius: 10px;
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+  opacity: 0.98;
+  font-size: 14px;
+  pointer-events: auto;
+}
+
+.toast.ok   { background: #166534; }
+.toast.warn { background: #92400e; }
+.toast.err  { background: #7f1d1d; }

@@ -1,0 +1,25 @@
+#!/usr/bin/env node
+
+const app = require('../app');
+const http = require('http');
+
+const PORT = process.env.PORT || 5300;
+app.set('port', PORT);
+
+const server = http.createServer(app);
+
+server.listen(PORT, () => {
+  console.log(`REPRESENTATIVE backend beží na http://localhost:${PORT}`);
+});
+
+server.on('error', (err) => {
+  if (err.syscall !== 'listen') throw err;
+  switch (err.code) {
+    case 'EADDRINUSE':
+      console.error(`Port ${PORT} je obsadený.`);
+      process.exit(1);
+      break;
+    default:
+      throw err;
+  }
+});

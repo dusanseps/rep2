@@ -19,6 +19,8 @@
     "vite-plugin-solid": "^2.11.8"
   },
   "dependencies": {
+    "@azure/msal-browser": "^5.5.0",
+    "@solidjs/router": "^0.15.4",
     "solid-js": "^1.9.9"
   }
 }

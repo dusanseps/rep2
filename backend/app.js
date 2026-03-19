@@ -1,41 +1,52 @@
-var createError = require('http-errors');
-var express = require('express');
-var path = require('path');
-var cookieParser = require('cookie-parser');
-var logger = require('morgan');
+/**
+ * Backend – Express server pre REPRESENTATIVE aplikáciu
+ * Databáza: PostgreSQL (user: rep_test)
+ * Auth: JWT v httpOnly cookie
+ */
 
-var indexRouter = require('./routes/index');
-var usersRouter = require('./routes/users');
+require('dotenv').config({ path: require('path').join(__dirname, '.env') });
+const express    = require('express');
+const path       = require('path');
+const logger     = require('morgan');
+const cookieParser = require('cookie-parser');
 
-var app = express();
+const authRouter      = require('./routes/auth');
+const eventsRouter    = require('./routes/events');
+const newsRouter      = require('./routes/news');
+const tickerRouter    = require('./routes/ticker');
+const uploadRouter    = require('./routes/upload');
+const documentsRouter = require('./routes/documents');
 
-// view engine setup
-app.set('views', path.join(__dirname, 'views'));
-app.set('view engine', 'jade');
+const app = express();
 
 app.use(logger('dev'));
 app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
-app.use(express.static(path.join(__dirname, 'public')));
 
-app.use('/', indexRouter);
-app.use('/users', usersRouter);
+/* ── API routes ─────────────────────────────────────────────── */
+app.use('/api/auth',      authRouter);
+app.use('/api/events',    eventsRouter);
+app.use('/api/news',      newsRouter);
+app.use('/api/ticker',    tickerRouter);
+app.use('/api/upload',    uploadRouter);
+app.use('/api/documents', documentsRouter);
 
-// catch 404 and forward to error handler
-app.use(function(req, res, next) {
-  next(createError(404));
-});
+/* ── Statické uploads (obrázky) ────────────────────────────── */
+app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
 
-// error handler
-app.use(function(err, req, res, next) {
-  // set locals, only providing error in development
-  res.locals.message = err.message;
-  res.locals.error = req.app.get('env') === 'development' ? err : {};
+/* ── Statičké súbory frontendu – IBA v produční (že dist existuje) ──── */
+if (process.env.NODE_ENV === 'production') {
+  const DIST = path.join(__dirname, '..', 'frontend', 'dist');
+  app.use(express.static(DIST));
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(DIST, 'index.html'));
+  });
+}
 
-  // render the error page
-  res.status(err.status || 500);
-  res.render('error');
+/* ── Error handler ──────────────────────────────────────────── */
+app.use((err, req, res, _next) => {
+  console.error(err.stack);
+  res.status(err.status || 500).json({ error: err.message });
 });
 
 module.exports = app;

@@ -1,0 +1,12 @@
+{
+  "name": "representative-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "REPRESENTATIVE – standalone webová aplikácia SEPS",
+  "scripts": {
+    "dev":        "cd frontend && npm run dev",
+    "build":      "cd frontend && npm run build",
+    "server":     "cd backend && npm start",
+    "install:all": "npm install --prefix frontend && npm install --prefix backend"
+  }
+}
