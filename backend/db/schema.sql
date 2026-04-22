@@ -3,7 +3,8 @@
 -- PostgreSQL, DB user: rep_test
 --
 -- Spustenie:
---   psql -U rep_test -d representative -f ./db/schema.sql
+
+--   psql -U rep_test -d representative -h localhost -f ./backend/db/schema.sql
 -- ============================================================
 
 -- ── Rozšírenia ───────────────────────────────────────────────
