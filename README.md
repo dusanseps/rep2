@@ -1,7 +1,6 @@
 # REPRESENTATIVE – Standalone Web App
 
-Samostatná webová aplikácia replikujúca SharePoint stránku REPRESENTATIVE (ŠEPS).  
-Prepojená na SharePoint Online cez Microsoft MSAL (OAuth2 PKCE).
+Interná webová aplikácia SEPS REPRESENTATIVE.
 
 ---
 
@@ -11,122 +10,123 @@ Prepojená na SharePoint Online cez Microsoft MSAL (OAuth2 PKCE).
 P2_Representative/
 ├── frontend/               # Vite + SolidJS + Tailwind CSS v4
 │   └── src/
-│       ├── config/
-│       │   ├── msal.js         ← ⚠️ VYPLNIŤ: Client ID + Tenant ID
-│       │   └── sharepoint.js   ← ⚠️ prispôsobiť navigáciu a listy
-│       ├── services/
-│       │   ├── auth.js         # MSAL auth service
-│       │   └── sp.js           # SharePoint REST API calls
 │       ├── components/
-│       │   ├── layout/         # Header, Sidebar
+│       │   ├── layout/         # Header, Sidebar, Shell
 │       │   ├── events/         # EventsPanel
 │       │   ├── news/           # NewsPanel
 │       │   └── ticker/         # Ticker + TickerModal
+│       ├── pages/              # DashboardPage, DocumentsPage, EventsPage, NewsPage, ManualPage
+│       ├── context/            # UserContext (JWT auth)
 │       └── styles/
-│           └── ticker.css      # Štýly tickera
-└── backend/                # Express – produkčný server + SP proxy
-    └── app.js
+│           └── ticker.css
+└── backend/                # Express + PostgreSQL
+    ├── routes/             # auth, ticker, events, news, documents, users, upload
+    ├── middleware/         # auth.js (JWT)
+    ├── db/
+    │   ├── schema.sql      # Schéma databázy
+    │   ├── seed.js         # Admin používateľ + ukážkové dáta
+    │   ├── seed_docs.js    # Štruktúra priečinkov dokumentov
+    │   └── migrate_ticker_att.js  # Prílohy tickera
+    └── public/uploads/     # Nahrané súbory
 ```
 
 ---
 
-## 1. Registrácia Azure AD aplikácie
+## 1. Prvotné nastavenie (po klonovaní z gitu)
 
-1. Otvorte [portal.azure.com](https://portal.azure.com) → **Azure Active Directory** → **App registrations** → **New registration**
-2. Nastavte:
-   - **Name**: `REPRESENTATIVE App`
-   - **Supported account types**: *Accounts in this organizational directory only*
-   - **Redirect URI**: `Single-page application (SPA)` → `http://localhost:3000` (dev)  
-     Pre produkciu pridajte ďalšiu URI, napr. `https://vas-server.sepssk.sk`
-3. Po registrácii skopírujte:
-   - **Application (client) ID** → `clientId` v `msal.js`
-   - **Directory (tenant) ID** → časť URL v `authority` v `msal.js`
+Celý postup sa vykonáva **jedenkrát** po stiahnutí projektu.
 
-### API Permissions
-
-V záložke **API permissions** pridajte:
-
-| API | Permission | Typ |
-|-----|-----------|-----|
-| Microsoft Graph | `User.Read` | Delegated |
-| SharePoint | `AllSites.Read` | Delegated |
-| SharePoint | `AllSites.Write` | Delegated |
-
-Kliknite **Grant admin consent**.
-
----
-
-## 2. Konfigurácia aplikácie
-
-Otvorte `frontend/src/config/msal.js` a vyplňte:
-
-```js
-export const MSAL_CONFIG = {
-  auth: {
-    clientId: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',  // ← váš Client ID
-    authority: 'https://login.microsoftonline.com/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
-    redirectUri: window.location.origin,
-  },
-  ...
-};
-```
-
-Prispôsobte `frontend/src/config/sharepoint.js`:
-- `SP_LISTS.events` – názov SharePoint Calendar listu (predvolene `'Udalosti'`)
-- `NAV_ITEMS` – navigačné linky v sidebari
-
----
-
-## 3. Spustenie (vývoj)
+### Krok 1 – Konfigurácia prostredia
 
 ```bash
-# Frontend (Vite dev server na port 3000)
-cd frontend
-npm install
-npm run dev
+cp backend/.env.example backend/.env
 ```
 
-Otvorte `http://localhost:3000` – prihlásenie cez Microsoft 365.
+Otvor `backend/.env` a doplň hodnoty:
 
----
+```
+DB_PASSWORD=Representative2026
+JWT_SECRET=<vygeneruj: node -e "console.log(require('crypto').randomBytes(48).toString('hex'))">
+```
 
-## 4. Produkčný build + spustenie
+### Krok 2 – Vytvor databázu (PostgreSQL, raz ako superuser)
 
 ```bash
-# Build frontendu
-cd frontend
-npm run build
-
-# Spustenie Express backendу (servíruje dist/ + SP proxy)
-cd ../backend
-npm install
-npm start
+sudo -u postgres psql -c "CREATE USER rep_test WITH PASSWORD 'Representative2026';"
+sudo -u postgres psql -c "CREATE DATABASE representative OWNER rep_test;"
+sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE representative TO rep_test;"
 ```
 
-Backend štandardne beží na porte 3000 (konfigurovateľné v `bin/www`).
+### Krok 3 – Vytvor tabuľky (schéma)
+
+```bash
+psql -U rep_test -d representative -h localhost -f backend/db/schema.sql
+```
+
+### Krok 4 – Spusti migrácie
+
+```bash
+cd backend
+node ./db/migrate_ticker_att.js
+```
+
+### Krok 5 – Naplň počiatočné dáta (seed)
+
+```bash
+node ./db/seed.js
+node ./db/seed_docs.js
+```
+
+> Po seede je vytvorený admin účet: **admin / Representative2026**
+
+### Krok 6 – Nainštaluj závislosti
+
+```bash
+# Backend
+cd backend && npm install
+
+# Frontend (v novom termináli)
+cd frontend && npm install
+```
 
 ---
 
-## 5. Ticker – správa správ
+## 2. Spustenie (vývoj)
+
+Spusti v **dvoch samostatných termináloch**:
+
+```bash
+# Terminál 1 – Backend (port 5300)
+cd backend && npm run dev
+```
+
+```bash
+# Terminál 2 – Frontend (port 3300)
+cd frontend && npm run dev
+```
+
+Aplikácia beží na `http://localhost:3300`.
+
+---
+
+## 3. Produkčný build
+
+```bash
+cd frontend && npm run build
+cd ../backend && npm start
+```
+
+---
+
+## 4. Ticker – správa správ
 
 - **Pravý klik** na ticker (dolná páska) → otvorí správcovský modal
-- Pridávanie, úprava, mazanie správ priamo cez SharePoint list `Ticker news`
-- Každá správa môže mať URL odkaz a životnosť (v dňoch alebo bez expirácie)
-
----
-
-## SharePoint listy
-
-| List | Použitie |
-|------|---------|
-| `Udalosti` | SharePoint Calendar – udalosti v paneli vľavo |
-| `Ticker news` | Vlastný list – správy v dolnej páske |
-| Site Pages | News Posts – novinky v paneli vpravo |
+- Pridávanie, úprava, mazanie správ, možnosť priložiť súbory
+- Každá správa môže mať URL odkaz a expiráciu (v dňoch alebo bez expirácie)
 
 ---
 
 ## Technológie
 
 - **Frontend**: [SolidJS](https://solidjs.com) + [Vite](https://vitejs.dev) + [Tailwind CSS v4](https://tailwindcss.com)
-- **Auth**: [@azure/msal-browser](https://github.com/AzureAD/microsoft-authentication-library-for-js)
-- **Backend**: [Express](https://expressjs.com) (produkčný server + voliteľný SP proxy)
+- **Backend**: [Express](https://expressjs.com) + [PostgreSQL](https://www.postgresql.org) + JWT auth
