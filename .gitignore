@@ -22,6 +22,7 @@ backend/public/uploads/*
 !backend/public/uploads/.gitkeep
 
 # Lock files (optional - keep package-lock.json)
+package-lock.json
 # pnpm-lock.yaml
 
 # System files
