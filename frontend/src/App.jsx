@@ -16,16 +16,18 @@ import NewsPage from './pages/NewsPage.jsx';
 import EventsPage from './pages/EventsPage.jsx';
 import DocumentsPage from './pages/DocumentsPage.jsx';
 import ManualPage from './pages/ManualPage.jsx';
+import AdminPage from './pages/AdminPage.jsx';
 
 function AppRouter({ user }) {
   return (
     <UserProvider value={user}>
       <Router root={Shell}>
-        <Route path="/"          component={DashboardPage} />
-        <Route path="/novinky"   component={NewsPage} />
-        <Route path="/udalosti"  component={EventsPage} />
+        <Route path="/" component={DashboardPage} />
+        <Route path="/novinky" component={NewsPage} />
+        <Route path="/udalosti" component={EventsPage} />
         <Route path="/dokumenty" component={DocumentsPage} />
-        <Route path="/manual"    component={ManualPage} />
+        <Route path="/manual" component={ManualPage} />
+        <Route path="/administracia" component={AdminPage} />
       </Router>
     </UserProvider>
   );
