@@ -62,11 +62,6 @@
   font-weight: 400;
 }
 
-/* Ticker bottom padding na body */
-.with-ticker-bottom {
-  padding-bottom: 64px !important;
-}
-
 /* ===== MODAL ===== */
 .dt-modal {
   position: fixed;

@@ -4,7 +4,7 @@
  * Prepojenie na SharePoint cez sp.js service (Bearer token auth).
  */
 
-import { createSignal, onMount, onCleanup } from 'solid-js';
+import { createSignal, createEffect, onMount, onCleanup } from 'solid-js';
 import { fetchTickerMessages } from '../../services/sp.js';
 import TickerModal from './TickerModal.jsx';
 import '../../styles/ticker.css';
@@ -46,6 +46,11 @@ export default function Ticker() {
 
   const [modalOpen, setModalOpen] = createSignal(false);
   const [messages, setMessages] = createSignal([]);
+  const [tickerMounted, setTickerMounted] = createSignal(false);
+
+  createEffect(() => {
+    document.body.classList.toggle('with-ticker', tickerMounted());
+  });
 
   let loopWidth = 0;
   let offset = 0;
@@ -104,7 +109,7 @@ export default function Ticker() {
 
   function startRaf() {
     lastTs = 0;
-    if (rafId != null) { try { cancelAnimationFrame(rafId); } catch (_) {} rafId = null; }
+    if (rafId != null) { try { cancelAnimationFrame(rafId); } catch (_) { } rafId = null; }
     rafId = requestAnimationFrame(tick);
   }
 
@@ -137,9 +142,6 @@ export default function Ticker() {
   }
 
   onMount(async () => {
-    // Pridaj triedu na body pre padding
-    document.body.classList.add('with-ticker-bottom');
-
     // Oneskorenie pri prvom renderi (SP layout môže byť ešte neviditeľný)
     function tryRender(attempt) {
       renderTrack();
@@ -176,16 +178,15 @@ export default function Ticker() {
   });
 
   onCleanup(() => {
-    if (rafId != null) try { cancelAnimationFrame(rafId); } catch (_) {}
+    if (rafId != null) try { cancelAnimationFrame(rafId); } catch (_) { }
     if (repaintTimer) clearTimeout(repaintTimer);
     if (minutelyTimer) clearInterval(minutelyTimer);
-    document.body.classList.remove('with-ticker-bottom');
   });
 
   return (
     <>
       <div
-        ref={tickerEl}
+        ref={el => { tickerEl = el; setTickerMounted(!!el); }}
         class="demo-ticker"
         title="Klikni pravým tlačidlom pre správu tickera"
       >

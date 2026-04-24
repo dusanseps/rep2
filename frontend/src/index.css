@@ -645,6 +645,11 @@ body {
   overflow: hidden;
 }
 
+/* Spodný okraj ak zobrazuje ticker */
+body.with-ticker .rep-page__content {
+  margin-bottom: 54px;
+}
+
 .rep-page__info {
   display: flex;
   gap: 12px;
