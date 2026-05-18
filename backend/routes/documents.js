@@ -8,6 +8,7 @@ const crypto  = require('crypto');
 const fs      = require('fs');
 const { query } = require('../db');
 const { requireAuth, requireEditor } = require('../middleware/auth');
+const { getStatus, reconnectNow } = require('../services/meili');
 
 const router = express.Router();
 
@@ -430,6 +431,18 @@ router.delete('/files/:id', requireAuth, requireEditor, async (req, res) => {
     console.error('[Delete File Error]', err.message);
     res.status(500).json({ error: 'Nepodarilo sa vymazať súbor. Skúste prosím neskôr.' });
   }
+});
+
+// ── Meilisearch status & reconnect (admin only) ──────────────────────────────
+router.get('/search/status', requireAuth, (req, res) => {
+  if (req.user?.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+  res.json(getStatus());
+});
+
+router.post('/search/reconnect', requireAuth, async (req, res) => {
+  if (req.user?.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+  const available = await reconnectNow();
+  res.json({ available, ...getStatus() });
 });
 
 module.exports = router;
