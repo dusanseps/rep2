@@ -8,6 +8,6 @@ export const NAV_ITEMS = [
   { label: 'Udalosti', href: '/udalosti', external: false },
   { label: 'Dokumenty', href: '/dokumenty', external: false },
   { label: 'Používateľský manuál', href: '/manual', external: false },
-  { label: 'Administrácia', href: '/administracia', external: false },
+  { label: 'Administrácia', href: '/administracia', external: false, roles: ['admin'] },
 ];
 

@@ -4,20 +4,26 @@
   "private": true,
   "scripts": {
     "start": "node ./bin/www",
-    "dev": "node ./bin/www",
+    "search:up": "sh ../scripts/start-meilisearch.sh",
+    "dev": "npm run search:up && node ./bin/www",
     "db:schema": "psql -U ${DB_USER:-rep_test} -d ${DB_NAME:-representative} -f ./db/schema.sql",
     "db:seed": "node ./db/seed.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "cookie-parser": "~1.4.4",
-    "debug": "~2.6.9",
     "dotenv": "^16.4.7",
     "express": "^4.22.1",
-    "http-proxy-middleware": "^3.0.5",
+    "express-rate-limit": "^8.5.1",
+    "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
+    "ldap-escape": "^2.0.6",
+    "ldapts": "^8.1.7",
+    "mammoth": "^1.12.0",
+    "meilisearch": "^0.58.0",
     "morgan": "^1.10.0",
     "multer": "^2.1.1",
+    "pdf-parse": "^2.4.5",
     "pg": "^8.13.3"
   }
 }

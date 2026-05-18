@@ -6,7 +6,10 @@
 
 import { createSignal, createEffect, onMount, onCleanup } from 'solid-js';
 import { fetchTickerMessages } from '../../services/sp.js';
+import { useLocation, useNavigate } from '@solidjs/router';
 import TickerModal from './TickerModal.jsx';
+import { showErrorToast } from '../ui/Toasts.jsx';
+import { useUser } from '../../context/user.jsx';
 import '../../styles/ticker.css';
 
 const PURGE_AFTER_DAYS = 30;
@@ -18,12 +21,6 @@ function esc(s) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-function escUrl(s) {
-  return s == null ? '' : String(s)
-    .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
-    .replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
 function activeMessages(list) {
   const t = Date.now();
   return list.filter(m => !m.expiresAt || m.expiresAt > t);
@@ -32,9 +29,6 @@ function activeMessages(list) {
 function buildLoopHTML(list) {
   const items = list.map(m => {
     const text = esc(m.text || '');
-    if (m.link) {
-      return `<span class="item"><a href="${escUrl(m.link)}" target="_blank" rel="noopener" data-interception="off"><strong>${text}</strong></a></span>`;
-    }
     return `<span class="item"><strong>${text}</strong></span>`;
   }).join('');
   return `<div class="loop">${items || '<span class="item"><strong>(Žiadne aktívne správy)</strong></span>'}</div>`;
@@ -44,9 +38,29 @@ export default function Ticker() {
   let tickerEl;
   let trackEl;
 
+  const location = useLocation();
+  const navigate = useNavigate();
   const [modalOpen, setModalOpen] = createSignal(false);
+  const [editTickerId, setEditTickerId] = createSignal(null);
   const [messages, setMessages] = createSignal([]);
   const [tickerMounted, setTickerMounted] = createSignal(false);
+
+  // Sleduj zmeny URL query parametra editTicker
+  createEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const tickerId = params.get('editTicker');
+    console.log('[Ticker] createEffect - location.search:', { search: location.search, tickerId });
+    
+    if (tickerId) {
+      const id = Number(tickerId);
+      console.log('[Ticker] Parsed tickerId:', { tickerId, id, isFinite: Number.isFinite(id) });
+      if (Number.isFinite(id) && id > 0) {
+        console.log('[Ticker] Setting editTickerId and opening modal:', { id });
+        setEditTickerId(id);
+        setModalOpen(true);
+      }
+    }
+  });
 
   createEffect(() => {
     document.body.classList.toggle('with-ticker', tickerMounted());
@@ -60,7 +74,7 @@ export default function Ticker() {
   let rafId = null;
   let paused = false;
   let repaintTimer = null;
-  let minutelyTimer = null;
+  let sseSource = null;
 
   function renderTrack() {
     if (!trackEl) return;
@@ -84,13 +98,8 @@ export default function Ticker() {
     offset = 0;
     trackEl.style.transform = 'translate3d(0,0,0)';
 
-    // Klikateľné linky – zabrán default na linky, otvor v novom okne
-    trackEl.querySelectorAll('a[href]').forEach(a => {
-      a.addEventListener('click', e => {
-        e.preventDefault();
-        try { window.open(a.href, '_blank', 'noopener'); } catch (_) { location.href = a.href; }
-      });
-    });
+    // Necháme natívne správanie <a target="_blank"> bez window.open,
+    // aby prehliadač nehlásil popup warning pri legitímnom kliknutí používateľa.
   }
 
   function tick(ts) {
@@ -109,7 +118,10 @@ export default function Ticker() {
 
   function startRaf() {
     lastTs = 0;
-    if (rafId != null) { try { cancelAnimationFrame(rafId); } catch (_) { } rafId = null; }
+    if (rafId != null) {
+      try { cancelAnimationFrame(rafId); } catch (err) { console.warn('[Ticker RAF] Cancel failed:', err.message); }
+      rafId = null;
+    }
     rafId = requestAnimationFrame(tick);
   }
 
@@ -132,6 +144,32 @@ export default function Ticker() {
       setMessages(data);
     } catch (err) {
       console.error('Ticker: nepodarilo sa načítať správy', err);
+      showErrorToast('Nepodarilo sa načítať ticker správy.');
+    }
+  }
+
+  function connectSSE() {
+    const API = import.meta.env.VITE_API_BASE || '/api';
+    try {
+      const eventSource = new EventSource(`${API}/ticker/subscribe`);
+      eventSource.addEventListener('message', (event) => {
+        try {
+          const { type, item } = JSON.parse(event.data);
+          if (type === 'create' || type === 'update' || type === 'delete') {
+            loadMessages().then(() => { renderTrack(); scheduleRepaint(); });
+          }
+        } catch (err) {
+          console.warn('[Ticker SSE] Parse failed:', err.message);
+        }
+      });
+      eventSource.addEventListener('error', () => {
+        console.warn('Ticker SSE error');
+        eventSource.close();
+      });
+      return eventSource;
+    } catch (err) {
+      console.warn('[Ticker SSE] Connection failed:', err.message);
+      return null;
     }
   }
 
@@ -158,10 +196,8 @@ export default function Ticker() {
     renderTrack();
     scheduleRepaint();
 
-    // Každú minútu refresh
-    minutelyTimer = setInterval(() => {
-      loadMessages().then(() => { renderTrack(); scheduleRepaint(); });
-    }, 60_000);
+    // Pripojiť sa na SSE pre real-time updates
+    sseSource = connectSSE();
 
     // Hover spomaľuje
     tickerEl?.addEventListener('mouseenter', () => { hoverFactor = 0.4; });
@@ -175,12 +211,14 @@ export default function Ticker() {
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') { startRaf(); renderTrack(); }
     });
+
+    setTickerMounted(true);
   });
 
   onCleanup(() => {
-    if (rafId != null) try { cancelAnimationFrame(rafId); } catch (_) { }
+    if (rafId != null) try { cancelAnimationFrame(rafId); } catch (err) { console.warn('[Ticker cleanup] RAF cancel failed:', err.message); }
     if (repaintTimer) clearTimeout(repaintTimer);
-    if (minutelyTimer) clearInterval(minutelyTimer);
+    if (sseSource) sseSource.close();
   });
 
   return (
@@ -195,8 +233,15 @@ export default function Ticker() {
 
       <TickerModal
         open={modalOpen()}
-        onClose={() => { setModalOpen(false); paused = false; }}
+        onClose={() => { 
+          setModalOpen(false); 
+          setEditTickerId(null);  // Resetuj editTickerId keď sa modal zavrie
+          navigate(location.pathname, { replace: true });
+          paused = false;
+        }}
         onMessagesChange={handleMessagesChange}
+        user={useUser()}
+        editTickerId={editTickerId}
       />
     </>
   );

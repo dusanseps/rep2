@@ -6,7 +6,7 @@ const express = require('express');
 const multer  = require('multer');
 const path    = require('path');
 const crypto  = require('crypto');
-const { requireAuth, requireEditor } = require('../middleware/auth');
+const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -31,7 +31,7 @@ const upload = multer({
 });
 
 // POST /api/upload/image
-router.post('/image', requireAuth, requireEditor, upload.single('image'), (req, res) => {
+router.post('/image', requireAuth, upload.single('image'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Žiadny súbor nebol nahraný.' });
   const url = `/uploads/${req.file.filename}`;
   res.status(201).json({ url });
@@ -59,7 +59,7 @@ const uploadAny = multer({
 });
 
 // POST /api/upload/file – ľubovoľný dokument (50 MB)
-router.post('/file', requireAuth, requireEditor, uploadAny.single('file'), (req, res) => {
+router.post('/file', requireAuth, uploadAny.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Žiadny súbor nebol nahraný.' });
   res.status(201).json({
     url:       `/uploads/${req.file.filename}`,
@@ -67,6 +67,38 @@ router.post('/file', requireAuth, requireEditor, uploadAny.single('file'), (req,
     size:      req.file.size,
     mime_type: req.file.mimetype,
   });
+});
+
+// POST /api/upload/cleanup – vymazať súbory (keď sa formulár zruší)
+router.post('/cleanup', requireAuth, (req, res) => {
+  const { urls } = req.body || {};
+  if (!Array.isArray(urls) || urls.length === 0) {
+    return res.status(400).json({ error: 'Žiadne URLs na vymazanie.' });
+  }
+
+  const fs = require('fs');
+  const path = require('path');
+  let deleted = 0;
+  let failed = 0;
+
+  for (const url of urls) {
+    try {
+      if (!url.startsWith('/uploads/')) continue;
+      const rel = decodeURIComponent(url.replace(/^\/uploads\//, ''));
+      const normalized = path.normalize(rel).replace(/^([.][.][\/\\])+/, '');
+      if (normalized.startsWith('..')) continue;
+      const filepath = path.join(__dirname, '..', 'public', 'uploads', normalized);
+      if (fs.existsSync(filepath)) {
+        fs.unlinkSync(filepath);
+        deleted++;
+      }
+    } catch (err) {
+      console.warn('[File cleanup failed]', err.message);
+      failed++;
+    }
+  }
+
+  res.json({ deleted, failed });
 });
 
 module.exports = router;

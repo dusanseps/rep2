@@ -3,17 +3,23 @@
  * Zachováva pôvodnú funkcionalitu: zoznam správ, formulár, CRUD na SharePoint.
  */
 
-import { createSignal, createEffect, For, Show, onMount } from 'solid-js';
+import { createSignal, createEffect, For, Show, onMount, onCleanup } from 'solid-js';
 import {
   fetchTickerMessages,
   createTickerMessage,
   updateTickerMessage,
   deleteTickerMessage,
 } from '../../services/sp.js';
+import ConflictRenameDialog from '../shared/ConflictRenameDialog.jsx';
+import { showErrorToast, showSuccessToast, showWarningToast } from '../ui/Toasts.jsx';
+import LoadingSpinner from '../shared/LoadingSpinner.jsx';
+import { shortBadgeText } from '../../utils/text.js';
+import { buildSuggestedName, normalizeFileName, validateFileName } from '../../utils/fileNames.js';
+import { cleanupOrphanedFiles, getNewlyUploadedUrls } from '../../utils/uploadCleanup.js';
 
 const DAY = 24 * 60 * 60 * 1000;
 
-function humanLeft(msg) {
+function formatTimeToExpire(msg) {
   if (!msg.expiresAt) return 'Bez expirácie';
   const ms = msg.expiresAt - Date.now();
   if (ms <= 0) return 'Expirované';
@@ -33,18 +39,50 @@ function safeUrl(u) {
     const t = String(u || '').trim();
     if (!t) return '';
     return decodeURIComponent(t);
-  } catch (_) { return String(u || '').trim(); }
+  } catch (err) {
+    console.warn('[TickerModal] URL decode failed:', err.message);
+    return String(u || '').trim();
+  }
 }
 
+function isAllowedLink(link) {
+  return /^https?:\/\//i.test(link) || link.startsWith('/');
+}
+
+function toSafeHref(rawHref) {
+  const href = String(rawHref || '').trim();
+  if (!href) return '#';
+  if (href.startsWith('/')) return href.startsWith('//') ? '#' : href;
+  try {
+    const url = new URL(href);
+    if (url.protocol === 'http:' || url.protocol === 'https:') return href;
+  } catch (_err) {
+    return '#';
+  }
+  return '#';
+}
+
+function flattenFolders(nodes, level = 0, out = [], showAll = true) {
+  for (const n of nodes || []) {
+    if (showAll || n.can_manage) {
+      // Skrátenie + minimálne odsadenie pre čitateľnosť
+      const maxLen = 40; // Dlžka options label v select 
+      const truncated = n.name.length > maxLen ? n.name.substring(0, maxLen - 1) + '…' : n.name;
+      out.push({ id: n.id, name: n.name, label: `${' '.repeat(level)}${truncated}` });
+    }
+    flattenFolders(n.children || [], level + 1, out, showAll);
+  }
+  return out;
+}
+
+
 export default function TickerModal(props) {
-  /* props: open, onClose, onMessagesChange */
+  /* props: open, onClose, onMessagesChange, user */
 
   const [msgs, setMsgs] = createSignal([]);
   const [loading, setLoading] = createSignal(false);
   const [search, setSearch] = createSignal('');
-  const [toast, setToast] = createSignal([]);
 
-  // Form state
   const [editId, setEditId] = createSignal('');
   const [fText, setFText] = createSignal('');
   const [fDays, setFDays] = createSignal('3');
@@ -55,13 +93,102 @@ export default function TickerModal(props) {
   const [errText, setErrText] = createSignal('');
   const [errLink, setErrLink] = createSignal('');
   const [linkCounter, setLinkCounter] = createSignal('');
+  const [docFolders, setDocFolders] = createSignal([]);
+  const [docFolderId, setDocFolderId] = createSignal('');
+  const [attachmentConflict, setAttachmentConflict] = createSignal(null);
+  let sseSource = null;
   let textRef;
   let fileInputRef;
+  let modalRef;
+  let openerRef = null;
+
+  // Track originally loaded attachments (for cleanup detection)
+  let originalAttachments = [];
+
+  // Helper: Get list of newly uploaded file URLs for cleanup
+  function getNewlyUploadedFileUrls() {
+    return getNewlyUploadedUrls(fAttachments(), originalAttachments);
+  }
+
+  // Helper: Cleanup orphaned files on server
+  async function cleanupOnClose() {
+    const urlsToCleanup = getNewlyUploadedFileUrls();
+    if (urlsToCleanup.length > 0) {
+      try {
+        await cleanupOrphanedFiles(urlsToCleanup, { silent: true });
+      } catch (err) {
+        console.warn('[TickerModal] Cleanup error on close (non-blocking):', err.message);
+        // Ignore cleanup errors on close - don't block modal closing
+      }
+    }
+  }
+
+  function requestClose() {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && modalRef?.contains(active)) {
+      active.blur();
+    }
+    
+    // ✅ NEW: Cleanup orphaned files before closing (with error handling)
+    cleanupOnClose().finally(() => {
+      props.onClose?.();
+    });
+  }
+
+  createEffect(() => {
+    if (props.open) {
+      openerRef = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      return;
+    }
+
+    if (openerRef && document.contains(openerRef)) {
+      queueMicrotask(() => {
+        openerRef?.focus?.();
+      });
+    }
+  });
+
+  function connectSSE() {
+    const API = import.meta.env.VITE_API_BASE || '/api';
+    try {
+      sseSource = new EventSource(`${API}/ticker/subscribe`);
+      sseSource.addEventListener('message', (event) => {
+        try {
+          const { type, item } = JSON.parse(event.data);
+          if (type === 'create' || type === 'update' || type === 'delete') {
+            loadMessages();
+          }
+        } catch (err) {
+          console.warn('[TickerModal SSE] Parse failed:', err.message);
+        }
+      });
+      sseSource.addEventListener('error', () => {
+        console.warn('Ticker Modal SSE error');
+        if (sseSource) sseSource.close();
+      });
+    } catch (err) {
+      console.warn('[TickerModal SSE] Connection failed:', err.message);
+    }
+  }
+
+  onMount(() => {
+    connectSSE();
+  });
+
+  onCleanup(() => {
+    if (sseSource) sseSource.close();
+  });
 
   function showToast(msg, type = 'ok') {
-    const id = Date.now();
-    setToast(t => [...t, { id, msg, type }]);
-    setTimeout(() => setToast(t => t.filter(x => x.id !== id)), 2200);
+    if (type === 'err') {
+      showErrorToast(msg);
+      return;
+    }
+    if (type === 'warn') {
+      showWarningToast(msg);
+      return;
+    }
+    showSuccessToast(msg);
   }
 
   async function loadMessages() {
@@ -70,21 +197,47 @@ export default function TickerModal(props) {
       const data = await fetchTickerMessages();
       setMsgs(data);
       props.onMessagesChange?.(data);
+      return data;
     } catch (err) {
       console.error(err);
       showToast(`Chyba načítania: ${err.message || err}`, 'err');
+      return null;
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleRefresh() {
+    setSearch('');
+    const data = await loadMessages();
+    if (data) {
+      showToast(`Obnovené: ${data.length} správ`, 'ok');
     }
   }
 
   createEffect(() => {
     if (props.open) {
       loadMessages();
+      loadDocFolders();
       resetForm();
       setTimeout(() => textRef?.focus(), 0);
     }
   });
+
+  async function loadDocFolders() {
+    try {
+      const API = import.meta.env.VITE_API_BASE || '/api';
+      const r = await fetch(`${API}/documents/tree`, { credentials: 'include' });
+      if (!r.ok) return;
+      const tree = await r.json();
+      const role = props.user?.role;
+      const isElevated = role === 'admin' || role === 'editor';
+      setDocFolders(flattenFolders(tree, 0, [], isElevated));
+    } catch (err) {
+      console.warn('[TickerModal] Load folders failed:', err.message);
+      setDocFolders([]);
+    }
+  }
 
   function resetForm() {
     setEditId('');
@@ -95,6 +248,9 @@ export default function TickerModal(props) {
     setErrText('');
     setErrLink('');
     setLinkCounter('');
+    setDocFolderId('');
+    // ✅ NEW: Reset original attachments tracking
+    originalAttachments = [];
   }
 
   function openEdit(id) {
@@ -104,6 +260,8 @@ export default function TickerModal(props) {
     setFText(m.text || '');
     setFLink(m.link || '');
     setFAttachments(m.attachments || []);
+    // ✅ NEW: Track original attachments for cleanup detection
+    originalAttachments = [...(m.attachments || [])];
     if (m.expiresDays && m.expiresDays > 0) {
       setFDays(String(m.expiresDays));
     } else if (m.expiresAt) {
@@ -138,8 +296,8 @@ export default function TickerModal(props) {
     if (!text) { setErrText('Nadpis je povinný.'); textRef?.focus(); return; }
 
     const link = safeUrl(fLink());
-    if (link && !/^https?:\/\//i.test(link)) {
-      setErrLink('URL musí začínať http:// alebo https://');
+    if (link && !isAllowedLink(link)) {
+      setErrLink('URL musí začínať http://, https:// alebo /uploads/...');
       return;
     }
     if (link.length > 2048) {
@@ -175,19 +333,156 @@ export default function TickerModal(props) {
 
   async function uploadTickerFiles(files) {
     if (!files.length) return;
+    const selectedFolderId = String(docFolderId() || '').trim();
+    if (!selectedFolderId) {
+      showToast('Najprv vyberte cieľový priečinok v Dokumentoch.', 'warn');
+      return;
+    }
+
+    async function uploadSingleFile(file, { overwrite = false, fileName } = {}) {
+      const fd = new FormData();
+      fd.append('file', file);
+      if (overwrite) fd.append('overwrite', 'true');
+      if (fileName) fd.append('fileName', fileName);
+
+      const r = await fetch(`${import.meta.env.VITE_API_BASE || '/api'}/documents/folders/${selectedFolderId}/upload`, {
+        method: 'POST', credentials: 'include', body: fd,
+      });
+
+      const body = await r.json().catch((err) => {
+        console.warn('[TickerModal upload] Response parse failed:', err.message);
+        return {};
+      });
+
+      if (r.status === 409) {
+        return { ok: false, conflict: true, body };
+      }
+      if (!r.ok) {
+        return { ok: false, conflict: false, body };
+      }
+      return { ok: true, body };
+    }
+
+    function askAttachmentConflict({ fileName, suggestedName, current, total }) {
+      return new Promise((resolve) => {
+        setAttachmentConflict({
+          fileName,
+          suggestedName,
+          current,
+          total,
+          onCancel: () => resolve({ action: 'cancel' }),
+          onOverwrite: () => resolve({ action: 'overwrite' }),
+          onRename: (nextName) => resolve({ action: 'rename', fileName: nextName }),
+        });
+      });
+    }
+
     setUploadingFiles(true);
     try {
-      for (const file of files) {
-        const fd = new FormData();
-        fd.append('file', file);
-        const r = await fetch(`${import.meta.env.VITE_API_BASE || '/api'}/upload/file`, {
-          method: 'POST', credentials: 'include', body: fd,
-        });
-        if (!r.ok) { const e = await r.json().catch(() => ({})); showToast(e.error || 'Chyba nahrávania', 'err'); continue; }
-        const data = await r.json();
-        setFAttachments(prev => [...prev, data]);
+      let uploaded = 0;
+      let overwritten = 0;
+      let skipped = 0;
+      let failed = 0;
+
+      for (let i = 0; i < files.length; i += 1) {
+        const file = files[i];
+        let targetName = normalizeFileName(file.name);
+        const initialErr = validateFileName(targetName);
+        if (initialErr) {
+          failed += 1;
+          showToast(initialErr, 'err');
+          continue;
+        }
+
+        let done = false;
+        while (!done) {
+          const result = await uploadSingleFile(file, { fileName: targetName });
+
+          if (result.ok) {
+            const data = result.body;
+            if (!fLink().trim() && data.file_url) {
+              onLinkInput(data.file_url);
+            }
+            setFAttachments(prev => [...prev, {
+              name: data.name,
+              url: data.file_url,
+              size: data.file_size,
+              mime_type: data.mime_type,
+            }]);
+            uploaded += 1;
+            done = true;
+            continue;
+          }
+
+          if (!result.conflict) {
+            failed += 1;
+            showToast(result.body?.error || 'Chyba nahrávania', 'err');
+            done = true;
+            continue;
+          }
+
+          const decision = await askAttachmentConflict({
+            fileName: result.body?.existingName || targetName,
+            suggestedName: result.body?.suggestedName || buildSuggestedName(targetName),
+            current: i + 1,
+            total: files.length,
+          });
+
+          if (decision.action === 'cancel') {
+            skipped += 1;
+            done = true;
+            continue;
+          }
+
+          if (decision.action === 'rename') {
+            targetName = normalizeFileName(decision.fileName);
+            const renameErr = validateFileName(targetName);
+            if (renameErr) {
+              showToast(renameErr, 'err');
+              skipped += 1;
+              done = true;
+            }
+            continue;
+          }
+
+          if (decision.action === 'overwrite') {
+            const overwriteResult = await uploadSingleFile(file, { fileName: targetName, overwrite: true });
+            if (overwriteResult.ok) {
+              const data = overwriteResult.body;
+              if (!fLink().trim() && data.file_url) {
+                onLinkInput(data.file_url);
+              }
+              setFAttachments(prev => [...prev, {
+                name: data.name,
+                url: data.file_url,
+                size: data.file_size,
+                mime_type: data.mime_type,
+              }]);
+              overwritten += 1;
+            } else {
+              failed += 1;
+              showToast(overwriteResult.body?.error || 'Nahradenie súboru zlyhalo', 'err');
+            }
+            done = true;
+          }
+        }
       }
-    } finally { setUploadingFiles(false); }
+
+      const summary = [];
+      if (uploaded) summary.push(`nahrané: ${uploaded}`);
+      if (overwritten) summary.push(`nahradené: ${overwritten}`);
+      if (skipped) summary.push(`zrušené: ${skipped}`);
+      if (failed) summary.push(`chyby: ${failed}`);
+
+      if (uploaded || overwritten) {
+        showToast(`Nahrávanie príloh dokončené (${summary.join(', ')})`, 'ok');
+      } else if (skipped && !failed) {
+        showToast(`Nahrávanie príloh zrušené (${summary.join(', ')})`, 'warn');
+      }
+    } finally {
+      setAttachmentConflict(null);
+      setUploadingFiles(false);
+    }
   }
 
   function removeAttachment(url) {
@@ -203,7 +498,7 @@ export default function TickerModal(props) {
     } else {
       setLinkCounter('');
     }
-    setErrLink(v && !/^https?:\/\//i.test(v) ? 'URL musí začínať http:// alebo https://' : '');
+    setErrLink(v && !isAllowedLink(v.trim()) ? 'URL musí začínať http://, https:// alebo /uploads/...' : '');
   }
 
   function handleChip(days) {
@@ -225,10 +520,16 @@ export default function TickerModal(props) {
   return (
     <>
       {/* Modal */}
-      <div id="dt-modal" class="dt-modal" aria-hidden={props.open ? 'false' : 'true'}>
-        <div class="dt-backdrop" onClick={props.onClose} />
+      <div
+        id="dt-modal"
+        ref={modalRef}
+        class="dt-modal"
+        aria-hidden={props.open ? 'false' : 'true'}
+        inert={!props.open}
+      >
+        <div class="dt-backdrop" onClick={requestClose} />
         <div class="dt-dialog" role="dialog" aria-modal="true" aria-labelledby="dt-modal-title"
-          onKeyDown={e => e.key === 'Escape' && props.onClose?.()}
+          onKeyDown={e => e.key === 'Escape' && requestClose()}
         >
           {/* Header */}
           <div class="dt-header">
@@ -237,16 +538,14 @@ export default function TickerModal(props) {
               <input
                 id="dt-search"
                 type="search"
-                placeholder="Hľadať v správach – text, autor…"
+                placeholder="Hľadať: text alebo autor"
                 aria-label="Hľadať v správach"
                 value={search()}
                 onInput={e => setSearch(e.target.value)}
               />
-              <button class="dt-btn dt-primary" onClick={resetForm}>+ Nová</button>
-              <button class="dt-btn" onClick={loadMessages} disabled={loading()} title="Obnoviť">
-                {loading() ? '…' : '↻ Obnoviť'}
+              <button class="dt-btn" onClick={handleRefresh} disabled={loading()} title="Obnoviť">
+                {loading() ? '…' : '↻'}
               </button>
-              <button class="dt-btn dt-ghost" onClick={props.onClose} aria-label="Zavrieť">✖</button>
             </div>
           </div>
 
@@ -256,18 +555,20 @@ export default function TickerModal(props) {
               {/* Zoznam */}
               <div class="dt-panel">
                 <div class="dt-list-head">
-                  <span>Správa</span><span>Stav</span><span>Akcie</span>
+                  <span>Správa ({filteredMsgs().length}/{msgs().length})</span><span>Stav</span><span>Akcie</span>
                 </div>
 
-                <div class="dt-list">
+                <div class="dt-list" classList={{ 'has-messages': !loading() && filteredMsgs().length > 0 }}>
                   <Show
-                    when={filteredMsgs().length > 0}
+                    when={!loading() && filteredMsgs().length > 0}
                     fallback={
-                      <div class="dt-card" style={{ 'grid-template-columns': '1fr' }}>
-                        <span style={{ color: '#6b7280', 'font-size': '13px' }}>
-                          {loading() ? 'Načítavam…' : 'Žiadne správy'}
-                        </span>
-                      </div>
+                      loading()
+                        ? <LoadingSpinner type="spinner" label="Načítavam správy…" size="sm" />
+                        : <div class="dt-card" style={{ 'grid-template-columns': '1fr' }}>
+                            <span style={{ color: '#6b7280', 'font-size': '13px' }}>
+                              Žiadne správy
+                            </span>
+                          </div>
                     }
                   >
                     <For each={filteredMsgs()}>
@@ -276,8 +577,8 @@ export default function TickerModal(props) {
                         return (
                           <div class="dt-card">
                             <div>
-                              <span class="dt-title">{m.text}</span>
-                              <span class="dt-sub">
+                              <span class="dt-title" lang="sk">{m.text}</span>
+                              <span class="dt-sub" lang="sk">
                                 {m.author && <>{m.author} · </>}
                                 {m.createdAt
                                   ? new Date(m.createdAt).toLocaleDateString('sk-SK')
@@ -289,12 +590,33 @@ export default function TickerModal(props) {
                                 {alive ? 'Aktívna' : 'Expirovaná'}
                               </span>
                               {alive && m.expiresAt &&
-                                <span class="badge warn">~ {humanLeft(m)}</span>}
-                              {m.link && <span class="badge link">odkaz</span>}
-                              {m.attachments?.length > 0 &&
-                                <span class="badge att">{m.attachments.length > 1 ? 'prílohy' : 'príloha'}</span>}
+                                <span class="badge warn">~ {formatTimeToExpire(m.expiresAt)}</span>}
+                              {m.link && (
+                                <a
+                                  class="badge link"
+                                  href={toSafeHref(m.link)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  title={m.link}
+                                >
+                                  {shortBadgeText(safeUrl(m.link).replace(/^https?:\/\//i, ''))}
+                                </a>
+                              )}
+                              <For each={m.attachments || []}>
+                                {(att) => (
+                                  <a
+                                    class="badge att"
+                                    href={toSafeHref(att.url)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    title={att.name}
+                                  >
+                                    {shortBadgeText(att.name)}
+                                  </a>
+                                )}
+                              </For>
                             </div>
-                            <div style={{ display: 'flex', gap: '6px' }}>
+                            <div class="dt-card-actions">
                               <button class="dt-btn" onClick={() => openEdit(m.id)}>Upraviť</button>
                               <button class="dt-btn dt-danger" onClick={() => handleDelete(m.id)}>Zmazať</button>
                             </div>
@@ -317,11 +639,10 @@ export default function TickerModal(props) {
                       type="text"
                       ref={textRef}
                       required
-                      placeholder="Text správy"
+                      placeholder="Krátka a zrozumiteľná správa"
                       value={fText()}
                       onInput={e => { setFText(e.target.value); setErrText(''); }}
                     />
-                    <small class="dt-help">Krátka a zrozumiteľná správa.</small>
                     <div class="dt-error" role="alert">{errText()}</div>
                   </div>
 
@@ -351,11 +672,10 @@ export default function TickerModal(props) {
                   {/* Link */}
                   <div class="dt-row">
                     <label for="dt-f-link">Odkaz (URL)</label>
-                    <small class="dt-help">Voliteľné – priečinok, súbor, alebo externá stránka</small>
                     <input
                       id="dt-f-link"
                       type="text"
-                      placeholder="https://…"
+                      placeholder="https:// alebo interný odkaz"
                       value={fLink()}
                       onInput={e => onLinkInput(e.target.value)}
                     />
@@ -366,6 +686,17 @@ export default function TickerModal(props) {
                   {/* Prílohy */}
                   <div class="dt-row">
                     <label>Prílohy</label>
+                    <div class="dt-inline" style={{ 'margin-bottom': '8px' }}>
+                      <select
+                        value={docFolderId()}
+                        onInput={e => setDocFolderId(e.target.value)}
+                        class="rep-form-select"
+                        style={{ flex: 1 }}
+                      >
+                        <option value="">Vyberte cieľový priečinok v Dokumentoch</option>
+                        <For each={docFolders()}>{f => <option value={String(f.id)} title={f.name}>{f.label}</option>}</For>
+                      </select>
+                    </div>
                     <div
                       class={`dt-dropzone${draggingFiles() ? ' dt-dropzone--over' : ''}`}
                       onDragOver={e => { e.preventDefault(); setDraggingFiles(true); }}
@@ -385,7 +716,7 @@ export default function TickerModal(props) {
                         <For each={fAttachments()}>
                           {att => (
                             <div class="dt-att-chip">
-                              <a href={att.url} target="_blank">{att.name}</a>
+                              <a href={toSafeHref(att.url)} target="_blank">{att.name}</a>
                               <button type="button" onClick={() => removeAttachment(att.url)}>×</button>
                             </div>
                           )}
@@ -395,20 +726,22 @@ export default function TickerModal(props) {
                   </div>
 
                   {/* Náhľad */}
-                  <div class="dt-preview">
-                    <div class="dt-preview-title">Náhľad</div>
-                    <div class="dt-preview-body">
-                      <span
-                        id="prev-text"
-                        style={{
-                          'text-decoration': prevUnderline(),
-                          cursor: fLink().trim() ? 'pointer' : 'default',
-                        }}
-                      >
-                        {fText().trim() || '—'}
-                      </span>
+                  <Show when={fText().trim()}>
+                    <div class="dt-preview">
+                      <div class="dt-preview-title">Náhľad</div>
+                      <div class="dt-preview-body">
+                        <span
+                          id="prev-text"
+                          style={{
+                            'text-decoration': prevUnderline(),
+                            cursor: fLink().trim() ? 'pointer' : 'default',
+                          }}
+                        >
+                          {fText().trim()}
+                        </span>
+                      </div>
                     </div>
-                  </div>
+                  </Show>
 
                   <div class="dt-form-actions">
                     <button type="submit" class="dt-btn dt-primary">Uložiť</button>
@@ -421,12 +754,22 @@ export default function TickerModal(props) {
         </div>
       </div>
 
-      {/* Toast */}
-      <div class="dt-toast" aria-live="polite" aria-atomic="true">
-        <For each={toast()}>
-          {(t) => <div class={`toast ${t.type}`}>{t.msg}</div>}
-        </For>
-      </div>
+      <Show when={attachmentConflict()}>
+        <ConflictRenameDialog
+          title={`Súbor už existuje (${attachmentConflict().current}/${attachmentConflict().total})`}
+          descriptionPrefix="V cieľovom priečinku už existuje súbor"
+          descriptionSuffix="Vyberte jednu možnosť: premenovať, zrušiť upload alebo prepísať existujúci súbor."
+          itemName={attachmentConflict().fileName}
+          suggestedName={attachmentConflict().suggestedName}
+          normalizeName={normalizeFileName}
+          validateName={validateFileName}
+          onRename={attachmentConflict().onRename}
+          onCancel={attachmentConflict().onCancel}
+          onOverwrite={attachmentConflict().onOverwrite}
+          cancelLabel="Zrušiť upload"
+          overwriteLabel="Prepísať súbor"
+        />
+      </Show>
     </>
   );
 }

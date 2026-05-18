@@ -4,6 +4,7 @@
  */
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 const { pool } = require('./index');
+const DEFAULT_USER_USERNAME = process.env.USER_USERNAME || 'user';
 
 // ── Pomocná funkcia ──────────────────────────────────────────────────────────
 
@@ -161,6 +162,35 @@ async function insertTree(client, nodes, parentId = null) {
   try {
     await client.query('BEGIN');
     await insertTree(client, TREE, null);
+
+    const userRes = await client.query(
+      `SELECT id
+       FROM users
+       WHERE lower(username) = lower($1)
+         AND role = 'user'
+       LIMIT 1`,
+      [DEFAULT_USER_USERNAME]
+    );
+    const userId = userRes.rows[0]?.id;
+
+    const rootRes = await client.query(
+      `SELECT id
+       FROM doc_folders
+       WHERE parent_id IS NULL
+       ORDER BY sort_order, id
+       LIMIT 1`
+    );
+    const rootFolderId = rootRes.rows[0]?.id;
+
+    if (userId && rootFolderId) {
+      await client.query(
+        `INSERT INTO user_folder_permissions (user_id, root_folder_id, assigned_by)
+         VALUES ($1, $2, $1)
+         ON CONFLICT (user_id, root_folder_id) DO NOTHING`,
+        [userId, rootFolderId]
+      );
+    }
+
     await client.query('COMMIT');
     const { rows } = await client.query('SELECT COUNT(*) FROM doc_folders');
     console.log(`✅ Seed dokončený – ${rows[0].count} priečinkov v DB`);

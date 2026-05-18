@@ -2,9 +2,12 @@ import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
 import solidPlugin from 'vite-plugin-solid';
 import devtools from 'solid-devtools/vite';
-
 export default defineConfig({
-  plugins: [devtools(), solidPlugin(), tailwindcss()],
+  plugins: [
+    process.env.NODE_ENV === 'development' ? devtools() : undefined,
+    solidPlugin(),
+    tailwindcss(),
+  ].filter(Boolean),
   server: {
     port: 3300,
     // Volania na /api/* sa presmerujú na lokálny Express backend (port 5300).

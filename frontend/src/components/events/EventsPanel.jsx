@@ -4,9 +4,10 @@
  * v rovnakom štýle ako originálna SharePoint stránka.
  */
 
-import { createResource, For, Show, Suspense } from 'solid-js';
+import { createResource, createEffect, For, Show, Suspense } from 'solid-js';
 import { A } from '@solidjs/router';
 import { fetchEvents } from '../../services/sp.js';
+import { showErrorToast } from '../ui/Toasts.jsx';
 
 const SK_MONTHS = ['jan', 'feb', 'mar', 'apr', 'máj', 'jún', 'júl', 'aug', 'sep', 'okt', 'nov', 'dec'];
 const SK_MONTHS_FULL = ['Január','Február','Marec','Apríl','Máj','Jún','Júl','August','September','Október','November','December'];
@@ -77,6 +78,12 @@ function SkeletonCard() {
 
 export default function EventsPanel(props) {
   const [events, { refetch }] = createResource(() => props.view, () => fetchEvents(6));
+  
+  createEffect(() => {
+    if (events.error) {
+      showErrorToast(events.error.message || 'Nepodarilo sa načítať udalosti.');
+    }
+  });
 
   return (
     <section class="rep-panel">
@@ -88,9 +95,8 @@ export default function EventsPanel(props) {
       <div class={`ev-list${props.view === 'cards' ? ' ev-list--cards' : ''}`}>
         <Suspense fallback={<For each={[1,2,3,4,5,6]}>{() => <SkeletonCard />}</For>}>
           <Show when={!events.error} fallback={
-            <div class="rep-panel__error">
-              <p>Nepodarilo sa načítať udalosti.</p>
-              <button onClick={refetch} class="rep-panel__retry">Skúsiť znova</button>
+            <div style={{ display: 'flex', gap: '8px', 'align-items': 'center', padding: '20px 0' }}>
+              <button onClick={refetch} class="rep-btn rep-btn--primary">Skúsiť znova</button>
             </div>
           }>
             <Show

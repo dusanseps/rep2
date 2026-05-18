@@ -5,6 +5,7 @@
 
 import { createSignal } from 'solid-js';
 import { login } from '../../services/auth.js';
+import { showErrorToast } from '../ui/Toasts.jsx';
 
 export default function LoginForm(props) {
   /* props: onLogin(user) */
@@ -24,6 +25,7 @@ export default function LoginForm(props) {
       props.onLogin?.(user);
     } catch (err) {
       setError(err.message || 'Prihlásenie zlyhalo.');
+      showErrorToast(err.message || 'Prihlásenie zlyhalo. Skontrolujte prihlasovacie údaje.');
     } finally {
       setLoading(false);
     }
@@ -66,10 +68,6 @@ export default function LoginForm(props) {
               disabled={loading()}
             />
           </div>
-
-          {error() && (
-            <div class="rep-login__error" role="alert">{error()}</div>
-          )}
 
           <button type="submit" class="rep-login__btn" disabled={loading()}>
             {loading() ? 'Prihlasovanie…' : 'Prihlásiť sa'}

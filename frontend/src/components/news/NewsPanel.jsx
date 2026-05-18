@@ -4,9 +4,10 @@
  * s miniatúrou, názvom, popisom a autorom.
  */
 
-import { createResource, For, Show, Suspense } from 'solid-js';
+import { createResource, createEffect, For, Show, Suspense } from 'solid-js';
 import { A } from '@solidjs/router';
 import { fetchNews } from '../../services/sp.js';
+import { showErrorToast } from '../ui/Toasts.jsx';
 
 function timeAgo(date) {
   if (!date) return '';
@@ -27,12 +28,18 @@ function truncate(str, max = 120) {
   return str.slice(0, max).trimEnd() + '…';
 }
 
+import { useNavigate, useSearchParams } from '@solidjs/router';
 function NewsCard(props) {
   const isCards = () => props.view === 'cards';
+  const navigate = useNavigate();
+  function openModal(e) {
+    e.preventDefault();
+    navigate(`/novinky?view=${props.item.id}`);
+  }
   return (
     <article class={`news-card${isCards() ? ' news-card--card' : ''}`}>
       <Show when={props.item.imageUrl}>
-        <a href={props.item.url || '#'} target="_blank" rel="noopener" class="news-card__img-wrap" tabindex="-1">
+        <a href={`/novinky?view=${props.item.id}`} class="news-card__img-wrap" tabIndex="-1" onClick={openModal}>
           <img
             src={props.item.imageUrl}
             alt={props.item.title}
@@ -43,7 +50,7 @@ function NewsCard(props) {
         </a>
       </Show>
       <div class="news-card__body">
-        <a href={props.item.url || '#'} target="_blank" rel="noopener" class="news-card__title">
+        <a href={`/novinky?view=${props.item.id}`} class="news-card__title" onClick={openModal}>
           {props.item.title}
         </a>
         <Show when={props.item.description}>
@@ -77,6 +84,12 @@ function SkeletonCard() {
 
 export default function NewsPanel(props) {
   const [news, { refetch }] = createResource(() => props.view, () => fetchNews(6));
+  
+  createEffect(() => {
+    if (news.error) {
+      showErrorToast(news.error.message || 'Nepodarilo sa načítať novinky.');
+    }
+  });
 
   return (
     <section class="rep-panel">
@@ -88,9 +101,8 @@ export default function NewsPanel(props) {
       <div class={`news-list${props.view === 'cards' ? ' news-list--cards' : ''}`}>
         <Suspense fallback={<For each={[1,2,3,4,5,6]}>{() => <SkeletonCard />}</For>}>
           <Show when={!news.error} fallback={
-            <div class="rep-panel__error">
-              <p>Nepodarilo sa načítať novinky.</p>
-              <button onClick={refetch} class="rep-panel__retry">Skúsiť znova</button>
+            <div style={{ display: 'flex', gap: '8px', 'align-items': 'center', padding: '20px 0' }}>
+              <button onClick={refetch} class="rep-btn rep-btn--primary">Skúsiť znova</button>
             </div>
           }>
             <Show

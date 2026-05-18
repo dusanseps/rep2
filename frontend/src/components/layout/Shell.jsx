@@ -1,6 +1,6 @@
 /**
- * Shell – obal pre všetky stránky: Header + Sidebar + Ticker + <Outlet>
- * Prijíma `props.children` od @solidjs/router (matched route component).
+ * Shell – obal pre všetky stránky: Header + Sidebar + Ticker
+ * Vyrenderuje props.children ako obsah.
  */
 import { useUser } from '../../context/user.jsx';
 import Header from './Header.jsx';

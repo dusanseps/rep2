@@ -1,45 +1,189 @@
 /**
  * NewsPage – správa noviniek (zoznam + pridávanie / úprava / mazanie)
  */
-import { createResource, createSignal, For, Show, Suspense } from 'solid-js';
-import { fetchAllNews, createNews, updateNews, deleteNews } from '../services/sp.js';
+import { createResource, createSignal, createEffect, createMemo, For, Show, Suspense, onCleanup } from 'solid-js';
+import { fetchAllNews, fetchNewsById, createNews, updateNews, deleteNews } from '../services/sp.js';
 import { useUser } from '../context/user.jsx';
+import { useSearchParams, useNavigate } from '@solidjs/router';
 import ConfirmDialog from '../components/shared/ConfirmDialog.jsx';
+import ConflictRenameDialog from '../components/shared/ConflictRenameDialog.jsx';
+import { buildSuggestedName, normalizeFileName, validateFileName } from '../utils/fileNames.js';
+import { cleanupOrphanedFiles, getNewlyUploadedUrls, getNewlyUploadedImageUrls } from '../utils/uploadCleanup.js';
+import NewsComments from '../components/news/NewsComments.jsx';
 
 const API = import.meta.env.VITE_API_BASE || '/api';
 
-// ── detail novinky ─────────────────────────────────────────────────────────────
-
-function NewsDetail({ item, onClose }) {
+// ── detail novinky v modale podľa query parametra view ───────────────
+function NewsDetailModal({ id, onClose }) {
+  const [news] = createResource(id, fetchNewsById);
   return (
-    <div class="rep-overlay" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div class="rep-drawer rep-drawer--wide">
-        <div class="rep-drawer__header">
-          <h2 class="rep-drawer__title" style={{ 'font-size': '17px', 'line-height': '1.4' }}>{item.title}</h2>
-          <button class="rep-drawer__close" onClick={onClose} aria-label="Zatvoriť">✕</button>
-        </div>
-        <div class="rep-drawer__body">
-          <Show when={item.imageUrl}>
-            <img src={item.imageUrl} alt={item.title}
-              style={{ width: '100%', 'max-height': '260px', 'object-fit': 'cover', 'border-radius': '10px', 'margin-bottom': '18px' }}
-              onError={e => { e.target.style.display = 'none'; }} />
-          </Show>
-          <div class="news-detail__meta" style={{ display: 'flex', gap: '12px', 'margin-bottom': '18px', 'font-size': '13px', color: '#64748b' }}>
-            <Show when={item.author}><span>✍ {item.author}</span></Show>
-            <Show when={item.publishedAt}>
-              <span>{item.publishedAt.toLocaleDateString('sk-SK', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
-            </Show>
+    <Show when={news()}>
+      <div class="rep-overlay" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+        <div class="rep-drawer rep-drawer--wide">
+          <div class="rep-drawer__header">
+            <h2 class="rep-drawer__title" style={{ 'font-size': '17px', 'line-height': '1.4' }}>{news().title}</h2>
+            <button class="rep-drawer__close" onClick={onClose} aria-label="Zatvoriť">✕</button>
           </div>
-          <Show when={item.description}>
-            <p style={{ 'font-size': '15px', color: '#334155', 'margin-bottom': '16px', 'font-weight': '500', 'line-height': '1.6' }}>{item.description}</p>
-          </Show>
-          <Show when={item.content} fallback={
-            <p style={{ color: '#94a3b8', 'font-style': 'italic' }}>Plný text nie je k dispozícii.</p>
-          }>
-            <div style={{ 'font-size': '14px', color: '#475569', 'line-height': '1.75', 'white-space': 'pre-wrap' }}>{item.content}</div>
-          </Show>
+          <div class="rep-drawer__body">
+            <Show when={news().imageUrl}>
+              <img src={news().imageUrl} alt={news().title}
+                style={{ width: '100%', 'max-height': '260px', 'object-fit': 'cover', 'border-radius': '10px', 'margin-bottom': '18px' }}
+                onError={e => { e.target.style.display = 'none'; }} />
+            </Show>
+            <div class="news-detail__meta" style={{ display: 'flex', gap: '12px', 'margin-bottom': '18px', 'font-size': '13px', color: '#64748b' }}>
+              <Show when={news().author}><span>✍ {news().author}</span></Show>
+              <Show when={news().publishedAt}>
+                <span>{news().publishedAt.toLocaleDateString('sk-SK', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
+              </Show>
+            </div>
+            <Show when={news().description}>
+              <p style={{ 'font-size': '15px', color: '#334155', 'margin-bottom': '16px', 'font-weight': '500', 'line-height': '1.6' }}>{news().description}</p>
+            </Show>
+            <Show when={news().content} fallback={
+              <p style={{ color: '#94a3b8', 'font-style': 'italic' }}>Plný text nie je k dispozícii.</p>
+            }>
+              <div style={{ 'font-size': '14px', color: '#475569', 'line-height': '1.75', 'white-space': 'pre-wrap' }}>{news().content}</div>
+            </Show>
+            {/* Komentáre pod novinkou */}
+            <div style={{ 'margin-top': '32px', 'border-top': '1px solid #e2e8f0', 'padding-top': '24px' }}>
+              <NewsComments newsId={news().id} />
+            </div>
+          </div>
         </div>
       </div>
+    </Show>
+  );
+}
+// ── hlavná stránka noviniek ───────────────────────────────────────────────
+export default function NewsPage() {
+  const [params, setParams] = useSearchParams();
+  const navigate = useNavigate();
+  const [showModal, setShowModal] = createSignal(!!params.view);
+  createEffect(() => {
+    setShowModal(!!params.view);
+  });
+  function closeModal() {
+    setShowModal(false);
+    navigate('/novinky', { replace: true });
+  }
+  // Escape key closes modal
+  onCleanup(() => {
+    const handler = (e) => { if (e.key === 'Escape') closeModal(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  });
+  // ...pôvodný obsah stránky (zoznam noviniek atď.)...
+  // Pôvodný obsah stránky (zoznam, filtre, edit, atď.)
+  // ---
+  // (skopírované z predchádzajúcej verzie, modal je len nadstavba)
+  // ---
+  // Základné dáta a stavy
+  const user = useUser();
+  const [news, { refetch }] = createResource(fetchAllNews);
+  const [editing, setEditing] = createSignal(null);   // null=closed, {}=new, {id,...}=edit
+  const [toDelete, setToDelete] = createSignal(null);
+  const [newsFilter, setNewsFilter] = createSignal('all'); // Filter: all, published, my-published, drafts, my-drafts
+
+  const canEdit = () => ['admin', 'editor'].includes(user()?.role);
+  const userId = () => user()?.id;
+  const isAdmin = () => ['admin', 'editor'].includes(user()?.role);
+
+  // Filter news based on current filter selection
+  const filteredNews = createMemo(() => {
+    const allNews = news() || [];
+    const filter = newsFilter();
+    switch (filter) {
+      case 'published':
+        return allNews.filter(n => n.publishedAt != null);
+      case 'my-published':
+        return allNews.filter(n => n.publishedAt != null && n.createdById === userId());
+      case 'drafts':
+        return isAdmin() ? allNews.filter(n => n.publishedAt == null) : [];
+      case 'my-drafts':
+        return allNews.filter(n => n.publishedAt == null && n.createdById === userId());
+      case 'all':
+      default:
+        if (isAdmin()) return allNews;
+        return allNews.filter(n => n.publishedAt != null || n.createdById === userId());
+    }
+  });
+
+  // Count utilities for filter buttons
+  const countAll = () => isAdmin() ? news()?.length || 0 : (news() || []).filter(n => n.publishedAt != null || n.createdById === userId()).length;
+  const countPublished = () => (news() || []).filter(n => n.publishedAt != null).length;
+  const countMyPublished = () => (news() || []).filter(n => n.publishedAt != null && n.createdById === userId()).length;
+  const countDrafts = () => (news() || []).filter(n => n.publishedAt == null).length;
+  const countMyDrafts = () => (news() || []).filter(n => n.publishedAt == null && n.createdById === userId()).length;
+
+  async function handleSave(data) {
+    if (editing()?.id) await updateNews(editing().id, data);
+    else await createNews(data);
+    setEditing(null);
+    refetch();
+  }
+
+  async function handleDelete() {
+    await deleteNews(toDelete());
+    setToDelete(null);
+    refetch();
+  }
+
+  return (
+    <div class="rep-page">
+      <div class="rep-page__header">
+        <h1 class="rep-page__title">Novinky</h1>
+        <Show when={canEdit()}>
+          <button class="rep-btn rep-btn--primary" onClick={() => setEditing({})}>
+            + Pridať novinku
+          </button>
+        </Show>
+      </div>
+      {/* Filter buttons */}
+      <div style={{ display: 'flex', gap: '8px', 'margin-bottom': '16px', 'flex-wrap': 'wrap' }}>
+        <button class={`rep-btn rep-btn--sm ${newsFilter() === 'all' ? 'rep-btn--primary' : 'rep-btn--ghost'}`} onClick={() => setNewsFilter('all')}>Všetky ({countAll()})</button>
+        <button class={`rep-btn rep-btn--sm ${newsFilter() === 'published' ? 'rep-btn--primary' : 'rep-btn--ghost'}`} onClick={() => setNewsFilter('published')}>Publikované ({countPublished()})</button>
+        <button class={`rep-btn rep-btn--sm ${newsFilter() === 'my-published' ? 'rep-btn--primary' : 'rep-btn--ghost'}`} onClick={() => setNewsFilter('my-published')}>Moje publikované ({countMyPublished()})</button>
+        <Show when={isAdmin()}>
+          <button class={`rep-btn rep-btn--sm ${newsFilter() === 'drafts' ? 'rep-btn--primary' : 'rep-btn--ghost'}`} onClick={() => setNewsFilter('drafts')}>Drafty ({countDrafts()})</button>
+        </Show>
+        <button class={`rep-btn rep-btn--sm ${newsFilter() === 'my-drafts' ? 'rep-btn--primary' : 'rep-btn--ghost'}`} onClick={() => setNewsFilter('my-drafts')}>Moje drafty ({countMyDrafts()})</button>
+      </div>
+      <div class="rep-page__content" style={{ paddingTop: '20px' }}>
+        <Suspense fallback={<p class="rep-page__loading">Načítavam…</p>}>
+          <Show when={!news.error} fallback={
+            <div class="rep-panel__error">
+              <p>Nepodarilo sa načítať novinky.</p>
+              <button onClick={refetch} class="rep-btn">Skúsiť znova</button>
+            </div>
+          }>
+            <Show when={filteredNews()?.length > 0} fallback={
+              <p class="rep-page__empty">Žiadne novinky. Kliknite na „+ Pridať novinku" pre vytvorenie prvej.</p>
+            }>
+              <div class="news-page-grid">
+                <For each={filteredNews()}>{item => (
+                  <NewsCard
+                    item={item}
+                    canEdit={canEdit()}
+                    onView={() => navigate(`/novinky?view=${item.id}`)}
+                    onEdit={() => setEditing(item)}
+                    onDelete={() => setToDelete(item.id)}
+                  />
+                )}</For>
+              </div>
+            </Show>
+          </Show>
+        </Suspense>
+      </div>
+      <Show when={editing() !== null}>
+        <NewsForm item={editing() || {}} onSave={handleSave} onClose={() => setEditing(null)} />
+      </Show>
+      <Show when={toDelete()}>
+        <ConfirmDialog message="Naozaj chcete odstrániť túto novinku? Akcia je nevratná." onConfirm={handleDelete} onCancel={() => setToDelete(null)} />
+      </Show>
+      {/* MODAL DETAIL NOVINKY */}
+      <Show when={showModal() && params.view}>
+        <NewsDetailModal id={params.view} onClose={closeModal} />
+      </Show>
     </div>
   );
 }
@@ -106,8 +250,42 @@ function NewsForm({ item, onSave, onClose }) {
   const [saving, setSaving] = createSignal(false);
   const [err, setErr] = createSignal('');
   const [uploading, setUploading] = createSignal(false);
+  const [uploadingFiles, setUploadingFiles] = createSignal(false);
   const [imageUrl, setImageUrl] = createSignal(item.imageUrl || '');
+  const [attachments, setAttachments] = createSignal(item.attachments || []);
+  const [docFolders, setDocFolders] = createSignal([]);
+  const [docFolderId, setDocFolderId] = createSignal('');
+  const [attachmentConflict, setAttachmentConflict] = createSignal(null);
+  const [originalImageUrl] = createSignal(item.imageUrl || '');
+  const [originalAttachments] = createSignal(item.attachments || []);
+  // isPublished: pre nový draft false, pre editáciu podľa item.isPublished
+  const [isPublished, setIsPublished] = createSignal(
+    typeof item.isPublished === 'boolean' ? item.isPublished : false
+  );
   let formRef;
+
+  // ✅ NEW: Cleanup handler for form cancellation
+  async function cleanupOnClose() {
+    // Get newly uploaded files (files added in this session but not saved)
+    const newAttachmentUrls = getNewlyUploadedUrls(attachments(), originalAttachments());
+    const newImageUrls = getNewlyUploadedImageUrls(imageUrl(), originalImageUrl());
+    const allNewUrls = [...newAttachmentUrls, ...newImageUrls];
+
+    if (allNewUrls.length > 0) {
+      try {
+        await cleanupOrphanedFiles(allNewUrls, { silent: true });
+      } catch (err) {
+        console.warn('[NewsForm] Cleanup error on close (non-blocking):', err.message);
+        // Ignore cleanup errors on close - don't block form closing
+      }
+    }
+  }
+
+  // ✅ NEW: Request close with cleanup
+  async function requestClose() {
+    await cleanupOnClose();
+    onClose?.();
+  }
 
   async function handleImageFile(e) {
     const file = e.target.files?.[0];
@@ -127,6 +305,150 @@ function NewsForm({ item, onSave, onClose }) {
     }
   }
 
+  async function uploadAttachmentFiles(files) {
+    if (!files?.length) return;
+    const selectedFolderId = String(docFolderId() || '').trim();
+    if (!selectedFolderId) {
+      setErr('Najprv vyberte cieľový priečinok v Dokumentoch.');
+      return;
+    }
+    setUploadingFiles(true);
+    setErr('');
+
+    async function uploadSingleFile(file, { overwrite = false, fileName } = {}) {
+      const fd = new FormData();
+      fd.append('file', file);
+      if (overwrite) fd.append('overwrite', 'true');
+      if (fileName) fd.append('fileName', fileName);
+
+      const r = await fetch(`${API}/documents/folders/${selectedFolderId}/upload`, {
+        method: 'POST', credentials: 'include', body: fd,
+      });
+
+      const body = await r.json().catch(() => ({}));
+      if (r.status === 409) return { ok: false, conflict: true, body };
+      if (!r.ok) return { ok: false, conflict: false, body };
+      return { ok: true, body };
+    }
+
+    function askAttachmentConflict({ fileName, suggestedName, current, total }) {
+      return new Promise((resolve) => {
+        setAttachmentConflict({
+          fileName,
+          suggestedName,
+          current,
+          total,
+          onCancel: () => resolve({ action: 'cancel' }),
+          onOverwrite: () => resolve({ action: 'overwrite' }),
+          onRename: (nextName) => resolve({ action: 'rename', fileName: nextName }),
+        });
+      });
+    }
+
+    try {
+      for (let i = 0; i < files.length; i += 1) {
+        const file = files[i];
+        let targetName = normalizeFileName(file.name);
+        const initialErr = validateFileName(targetName);
+        if (initialErr) {
+          setErr(initialErr);
+          continue;
+        }
+
+        let done = false;
+        while (!done) {
+          const result = await uploadSingleFile(file, { fileName: targetName });
+
+          if (result.ok) {
+            const data = result.body;
+            setAttachments((prev) => [...prev, {
+              name: data.name,
+              url: data.file_url,
+              size: data.file_size,
+              mime_type: data.mime_type,
+            }]);
+            done = true;
+            continue;
+          }
+
+          if (!result.conflict) {
+            throw new Error(result.body?.error || 'Nahrávanie prílohy zlyhalo.');
+          }
+
+          const decision = await askAttachmentConflict({
+            fileName: result.body?.existingName || targetName,
+            suggestedName: result.body?.suggestedName || buildSuggestedName(targetName),
+            current: i + 1,
+            total: files.length,
+          });
+
+          if (decision.action === 'cancel') {
+            done = true;
+            continue;
+          }
+
+          if (decision.action === 'rename') {
+            targetName = normalizeFileName(decision.fileName);
+            const renameErr = validateFileName(targetName);
+            if (renameErr) {
+              setErr(renameErr);
+              done = true;
+            }
+            continue;
+          }
+
+          if (decision.action === 'overwrite') {
+            const overwriteResult = await uploadSingleFile(file, { fileName: targetName, overwrite: true });
+            if (!overwriteResult.ok) {
+              throw new Error(overwriteResult.body?.error || 'Nahradenie prílohy zlyhalo.');
+            }
+            const data = overwriteResult.body;
+            setAttachments((prev) => [...prev, {
+              name: data.name,
+              url: data.file_url,
+              size: data.file_size,
+              mime_type: data.mime_type,
+            }]);
+            done = true;
+          }
+        }
+      }
+    } catch (e) {
+      setErr(`Nahrávanie prílohy zlyhalo: ${e.message}`);
+    } finally {
+      setAttachmentConflict(null);
+      setUploadingFiles(false);
+    }
+  }
+
+  // Načítaj priečinky pre dokumenty
+  async function loadDocFolders() {
+    try {
+      const r = await fetch(`${API}/documents/tree`, { credentials: 'include' });
+      if (!r.ok) return;
+      const tree = await r.json();
+      const flattened = flattenFolders(tree);
+      setDocFolders(flattened);
+    } catch (err) {
+      console.warn('[NewsPage] Load folders failed:', err.message);
+      setDocFolders([]);
+    }
+  }
+
+  function flattenFolders(nodes, level = 0, out = []) {
+    for (const n of nodes || []) {
+      const maxLen = 40;
+      const truncated = n.name.length > maxLen ? n.name.substring(0, maxLen - 1) + '…' : n.name;
+      out.push({ id: n.id, name: n.name, label: `${' '.repeat(level)}${truncated}` });
+      flattenFolders(n.children || [], level + 1, out);
+    }
+    return out;
+  }
+
+  createEffect(() => {
+    loadDocFolders();
+  });
+
   async function submit(e) {
     e.preventDefault();
     const f = new FormData(formRef);
@@ -138,7 +460,8 @@ function NewsForm({ item, onSave, onClose }) {
         content:        f.get('content') || null,
         bannerImageUrl: imageUrl() || null,
         authorName:     f.get('authorName') || null,
-        isPublished:    f.get('isPublished') === 'on',
+        isPublished:    isPublished(),
+        attachments:    attachments(),
       });
     } catch (e) {
       setErr(e.message || 'Chyba pri ukladaní.');
@@ -148,14 +471,20 @@ function NewsForm({ item, onSave, onClose }) {
   }
 
   return (
-    <div class="rep-overlay" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div class="rep-drawer">
+    <>
+      <div class="rep-overlay" onClick={e => { if (e.target === e.currentTarget) requestClose(); }}>
+        <div class="rep-drawer">
         <div class="rep-drawer__header">
           <h2 class="rep-drawer__title">{item.id ? 'Upraviť novinku' : 'Nová novinku'}</h2>
-          <button class="rep-drawer__close" onClick={onClose} aria-label="Zatvoriť">✕</button>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button type="button" class="rep-btn rep-btn--ghost rep-btn--sm" onClick={requestClose}>Zrušiť</button>
+            <button type="submit" form="news-form" class="rep-btn rep-btn--primary rep-btn--sm" disabled={saving() || uploading()}>
+              {saving() ? 'Ukladám…' : (item.id ? 'Uložiť zmeny' : 'Pridať novinku')}
+            </button>
+          </div>
         </div>
 
-        <form ref={formRef} onSubmit={submit} class="rep-form">
+        <form id="news-form" ref={formRef} onSubmit={submit} class="rep-form" style={{ 'padding-bottom': '70px' }}>
           <div class="rep-form__row">
             <label class="rep-form__label">Názov *</label>
             <input class="rep-form__input" name="title" required value={item.title || ''} placeholder="Názov novinky" />
@@ -169,6 +498,23 @@ function NewsForm({ item, onSave, onClose }) {
           <div class="rep-form__row">
             <label class="rep-form__label">Obsah</label>
             <textarea class="rep-form__input" name="content" rows="7" placeholder="Plný text novinky…">{item.content || ''}</textarea>
+          </div>
+
+          <div class="rep-form__row">
+            <label class="rep-form__label">Autor</label>
+            <input class="rep-form__input" name="authorName" value={item.author || ''} placeholder="Meno Priezvisko" />
+          </div>
+
+          <div class="rep-form__row rep-form__row--check">
+            <label class="rep-form__check">
+              <input
+                type="checkbox"
+                name="isPublished"
+                checked={isPublished()}
+                onInput={e => setIsPublished(e.target.checked)}
+              />
+              <span>Publikovať novinku</span>
+            </label>
           </div>
 
           <div class="rep-form__row">
@@ -189,112 +535,62 @@ function NewsForm({ item, onSave, onClose }) {
           </div>
 
           <div class="rep-form__row">
-            <label class="rep-form__label">Autor</label>
-            <input class="rep-form__input" name="authorName" value={item.author || ''} placeholder="Meno Priezvisko" />
-          </div>
-
-          <div class="rep-form__row rep-form__row--check">
-            <label class="rep-form__check">
-              <input type="checkbox" name="isPublished" checked={item.publishedAt != null} />
-              <span>Zverejniť ihneď</span>
+            <label class="rep-form__label">Priložené dokumenty</label>
+            <select
+              value={docFolderId()}
+              onInput={e => setDocFolderId(e.target.value)}
+              class="rep-form-select"
+              style={{ 'margin-bottom': '12px' }}
+            >
+              <option value="">Vyberte cieľový priečinok v Dokumentoch</option>
+              <For each={docFolders()}>{f => <option value={String(f.id)} title={f.name}>{f.label}</option>}</For>
+            </select>
+            <Show when={attachments().length > 0}>
+              <div style={{ 'margin-bottom': '12px' }}>
+                <For each={attachments()}>
+                  {(att, idx) => (
+                    <div style={{ display: 'flex', gap: '8px', 'align-items': 'center', padding: '8px', background: '#f1f5f9', 'border-radius': '6px', 'margin-bottom': '6px' }}>
+                      <span style={{ flex: 1, 'font-size': '13px', color: '#334155' }}>{att.name || att.url}</span>
+                      <button type="button" onClick={() => setAttachments(prev => prev.filter((_, i) => i !== idx()))}
+                        style={{ padding: '4px 8px', background: '#e2e8f0', border: 'none', 'border-radius': '4px', cursor: 'pointer', 'font-size': '12px' }}>Odstrániť</button>
+                    </div>
+                  )}
+                </For>
+              </div>
+            </Show>
+            <label class="rep-upload-btn">
+              <input type="file" multiple style={{ display: 'none' }} onChange={e => uploadAttachmentFiles([...e.target.files])} disabled={uploadingFiles()} />
+              {uploadingFiles() ? '⏳ Nahrávam…' : '📎 Nahrať dokumenty'}
             </label>
           </div>
 
           <Show when={err()}>
             <div class="rep-login__error">{err()}</div>
           </Show>
-
-          <div class="rep-form__actions">
-            <button type="button" class="rep-btn rep-btn--ghost" onClick={onClose}>Zrušiť</button>
-            <button type="submit" class="rep-btn rep-btn--primary" disabled={saving() || uploading()}>
-              {saving() ? 'Ukladám…' : (item.id ? 'Uložiť zmeny' : 'Pridať novinku')}
-            </button>
-          </div>
         </form>
+        </div>
       </div>
-    </div>
+
+      <Show when={attachmentConflict()}>
+        <ConflictRenameDialog
+          title={`Súbor už existuje (${attachmentConflict().current}/${attachmentConflict().total})`}
+          descriptionPrefix="V cieľovom priečinku už existuje súbor"
+          descriptionSuffix="Vyberte jednu možnosť: premenovať, zrušiť upload alebo prepísať existujúci súbor."
+          itemName={attachmentConflict().fileName}
+          suggestedName={attachmentConflict().suggestedName}
+          normalizeName={normalizeFileName}
+          validateName={validateFileName}
+          onRename={attachmentConflict().onRename}
+          onCancel={attachmentConflict().onCancel}
+          onOverwrite={attachmentConflict().onOverwrite}
+          cancelLabel="Zrušiť upload"
+          overwriteLabel="Prepísať súbor"
+        />
+      </Show>
+    </>
   );
 }
 
 // ── hlavná stránka ───────────────────────────────────────────────────────────
 
-export default function NewsPage() {
-  const user = useUser();
-  const [news, { refetch }] = createResource(fetchAllNews);
-  const [editing, setEditing] = createSignal(null);   // null=closed, {}=new, {id,...}=edit
-  const [toDelete, setToDelete] = createSignal(null);
-  const [viewing, setViewing] = createSignal(null);   // detail novinky
-
-  const canEdit = () => ['admin', 'editor'].includes(user()?.role);
-
-  async function handleSave(data) {
-    if (editing().id) await updateNews(editing().id, data);
-    else await createNews(data);
-    setEditing(null);
-    refetch();
-  }
-
-  async function handleDelete() {
-    await deleteNews(toDelete());
-    setToDelete(null);
-    refetch();
-  }
-
-  return (
-    <div class="rep-page">
-      <div class="rep-page__header">
-        <h1 class="rep-page__title">Novinky</h1>
-        <Show when={canEdit()}>
-          <button class="rep-btn rep-btn--primary" onClick={() => setEditing({})}>
-            + Pridať novinku
-          </button>
-        </Show>
-      </div>
-
-      <div class="rep-page__content">
-        <Suspense fallback={<p class="rep-page__loading">Načítavam…</p>}>
-          <Show when={!news.error} fallback={
-            <div class="rep-panel__error">
-            <p>Nepodarilo sa načítať novinky.</p>
-            <button onClick={refetch} class="rep-btn">Skúsiť znova</button>
-          </div>
-        }>
-          <Show when={news()?.length > 0} fallback={
-            <p class="rep-page__empty">Žiadne novinky. Kliknite na „+ Pridať novinku" pre vytvorenie prvej.</p>
-          }>
-            <div class="news-page-grid">
-              <For each={news()}>
-                {item => (
-                  <NewsCard
-                    item={item}
-                    canEdit={canEdit()}
-                    onView={() => setViewing(item)}
-                    onEdit={() => setEditing(item)}
-                    onDelete={() => setToDelete(item.id)}
-                  />
-                )}
-              </For>
-            </div>
-          </Show>
-        </Show>
-      </Suspense>
-      </div>
-
-      <Show when={viewing() !== null}>
-        <NewsDetail item={viewing()} onClose={() => setViewing(null)} />
-      </Show>
-
-      <Show when={editing() !== null}>
-        <NewsForm item={editing()} onSave={handleSave} onClose={() => setEditing(null)} />
-      </Show>
-
-      <Show when={toDelete()}>
-        <ConfirmDialog
-          message="Naozaj chcete odstrániť túto novinku? Akcia je nevratná."
-          onConfirm={handleDelete}
-          onCancel={() => setToDelete(null)}
-        />
-      </Show>
-    </div>
-  );
-}
+// ...pôvodný obsah stránky je nižšie, zachovať len jednu definíciu NewsPage

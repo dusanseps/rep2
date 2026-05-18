@@ -126,6 +126,40 @@ cd ../backend && npm start
 
 ---
 
+## 5. Reindexovanie dokumentov (na čo je to)
+
+Reindexovanie je admin akcia, ktorá znovu prečíta existujúce dokumenty z databázy a pripraví ich pre full-text vyhľadávanie (Meilisearch).
+
+Čo to prakticky robí:
+
+- Prejde existujúce dokumenty v systéme.
+- Extrahuje text z podporovaných súborov (napr. PDF/DOCX/TXT).
+- Uloží názov, cestu a text do vyhľadávacieho indexu.
+
+Prečo je to užitočné:
+
+- Vyhľadávanie je rýchlejšie a presnejšie.
+- Dá sa hľadať aj podľa obsahu dokumentu, nie len podľa názvu.
+- Je to záchranná akcia po migrácii, obnove dát alebo ak index nie je synchronizovaný.
+
+Je to nevyhnutné pri bežnej prevádzke?
+
+- Nie. Nové dokumenty sa indexujú priebežne pri nahraní.
+- Reindex sa používa skôr výnimočne, keď treba "dorovnať" index.
+
+Odporúčanie pre produkciu:
+
+- Tlačidlo "Reindexovať" ponechať ako servisnú admin funkciu.
+- Spúšťať len pri potrebe (migrácia, obnova, podozrenie na neúplné výsledky vyhľadávania).
+
+Čo sa deje pri výpadku Meilisearch:
+
+- Aplikácia beží ďalej (graceful degradation), ale full-text dokumentov je dočasne nedostupný.
+- Backend sa pokúša o automatické opätovné pripojenie každých 30 sekúnd.
+- V Administrácii je dostupný stav vyhľadávania a tlačidlo "Skúsiť pripojiť teraz" pre okamžitý manuálny pokus.
+
+---
+
 ## Technológie
 
 - **Frontend**: [SolidJS](https://solidjs.com) + [Vite](https://vitejs.dev) + [Tailwind CSS v4](https://tailwindcss.com)

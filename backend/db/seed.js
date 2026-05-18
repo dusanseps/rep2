@@ -17,8 +17,13 @@ const { query, pool } = require('./index');
 async function seed() {
   const username = process.env.ADMIN_USERNAME || 'admin';
   const password = process.env.ADMIN_PASSWORD || 'Representative2026';
-  const email    = process.env.ADMIN_EMAIL    || 'admin@sepssk.sk';
-  const hash     = await bcrypt.hash(password, 10);
+  const email = process.env.ADMIN_EMAIL || 'admin@sepssk.sk';
+  const hash = await bcrypt.hash(password, 10);
+
+  const user_username = process.env.USER_USERNAME || 'user';
+  const user_password = process.env.USER_PASSWORD || 'CommonUser2026';
+  const user_email = process.env.USER_EMAIL || 'user@sepssk.sk';
+  const user_hash = await bcrypt.hash(user_password, 10);
 
   // Admin
   await query(`
@@ -27,6 +32,41 @@ async function seed() {
     ON CONFLICT (username) DO NOTHING
   `, [username, email, 'Administrátor', hash]);
   console.log(`✓ Admin: ${username} / ${password}`);
+
+  // Bežný užívateľ  
+  await query(`
+    INSERT INTO users (username, email, display_name, password_hash, role)
+    VALUES ($1, $2, $3, $4, 'user')
+    ON CONFLICT (username) DO NOTHING
+  `, [user_username, user_email, 'Bežný užívateľ', user_hash]);
+  console.log(`✓ User: ${user_username} / ${user_password}`);
+
+  // Pridelenie prístupu usera – nájdi user ID a root folder ID, potom vlož permission
+  const userResult = await query(
+    'SELECT id FROM users WHERE lower(username) = lower($1) AND role = \'user\' LIMIT 1',
+    [user_username]
+  );
+  const userId = userResult.rows[0]?.id;
+
+  const rootFolderResult = await query(
+    'SELECT id FROM doc_folders WHERE parent_id IS NULL ORDER BY sort_order, id LIMIT 1'
+  );
+  const rootFolderId = rootFolderResult.rows[0]?.id;
+
+  if (userId && rootFolderId) {
+    const insertPermission = await query(
+      `INSERT INTO user_folder_permissions (user_id, root_folder_id, assigned_by)
+       VALUES ($1, $2, $1)
+       ON CONFLICT (user_id, root_folder_id) DO NOTHING`,
+      [userId, rootFolderId]
+    );
+    
+    if (insertPermission.rowCount > 0) {
+      console.log(`✓ User folder permission: ${user_username} -> root folder ${rootFolderId}`);
+    }
+  } else {
+    console.log('! User folder permission preskočené (chýba user alebo root folder)');
+  }
 
   // Ukážkové udalosti
   await query(`
