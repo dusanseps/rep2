@@ -1,4 +1,4 @@
-import { createSignal, onCleanup, onMount } from "solid-js";
+import { createSignal, onCleanup, onMount, Show } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 
 import { logout } from "../../services/auth.js";
@@ -7,7 +7,6 @@ import styles from "./Header.module.css";
 export default function Header({ user }) {
   const [menuOpen, setMenuOpen] = createSignal(false);
   const [search, setSearch] = createSignal("");
-  const [searchFocus, setSearchFocus] = createSignal(false);
   const navigate = useNavigate();
   let menuRef, avatarRef, searchRef;
 
@@ -20,7 +19,7 @@ export default function Header({ user }) {
     .toUpperCase();
 
   onMount(() => {
-    function handleClick(e) {
+    function handleMouseClick(e) {
       if (
         menuOpen() &&
         menuRef &&
@@ -31,19 +30,19 @@ export default function Header({ user }) {
         setMenuOpen(false);
       }
     }
+
     function handleKey(e) {
       if (e.key === "Escape") {
         setMenuOpen(false);
-        if (searchFocus()) {
-          setSearchFocus(false);
-          searchRef?.blur();
-        }
+        searchRef?.blur();
       }
     }
-    document.addEventListener("mousedown", handleClick);
+
+    document.addEventListener("mousedown", handleMouseClick);
     document.addEventListener("keydown", handleKey);
+
     onCleanup(() => {
-      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("mousedown", handleMouseClick);
       document.removeEventListener("keydown", handleKey);
     });
   });
@@ -53,7 +52,6 @@ export default function Header({ user }) {
     const value = search().trim();
     if (value.length >= 2) {
       setSearch("");
-      setSearchFocus(false);
       navigate(`/search?query=${encodeURIComponent(value)}`);
     }
   }
@@ -66,7 +64,10 @@ export default function Header({ user }) {
           alt="SEPS"
           class={styles["rep-header__logo"]}
         />
-        <span class={styles["rep-header__title"]}>REPRESENTATIVE 2</span>
+        <span class={styles["rep-header__title"]}>
+          <span class={styles["rep-header__title-short"]}>REP 2</span>
+          <span class={styles["rep-header__title-full"]}>REPRESENTATIVE 2</span>
+        </span>
       </div>
       <div class={styles["rep-header__actions"]}>
         <form
@@ -82,8 +83,6 @@ export default function Header({ user }) {
               placeholder="Vyhľadať..."
               value={search()}
               onInput={(e) => setSearch(e.target.value)}
-              onFocus={() => setSearchFocus(true)}
-              onBlur={() => setSearchFocus(false)}
             />
             <button
               type="submit"
@@ -122,14 +121,14 @@ export default function Header({ user }) {
           >
             {initials}
           </button>
-          {menuOpen() && (
+          <Show when={menuOpen()}>
             <div ref={(el) => (menuRef = el)} class={styles["rep-user-menu"]}>
               <div class={styles["rep-user-menu__name"]}>{displayName}</div>
               <button class={styles["rep-user-menu__logout"]} onClick={logout}>
                 Odhlásiť sa
               </button>
             </div>
-          )}
+          </Show>
         </div>
       </div>
     </header>
