@@ -7,8 +7,9 @@ const path    = require('path');
 const crypto  = require('crypto');
 const fs      = require('fs');
 const { query } = require('../db');
-const { requireAuth, requireEditor } = require('../middleware/auth');
-const { getStatus, reconnectNow } = require('../services/meili');
+const { requireAuth, requireEditor, requireAdmin } = require('../middleware/auth');
+const { extractText } = require('../services/textExtract');
+const { getStatus, reconnectNow, indexDocument } = require('../services/meili');
 
 const router = express.Router();
 
@@ -433,16 +434,80 @@ router.delete('/files/:id', requireAuth, requireEditor, async (req, res) => {
   }
 });
 
-// ── Meilisearch status & reconnect (admin only) ──────────────────────────────
-router.get('/search/status', requireAuth, (req, res) => {
-  if (req.user?.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+// ── GET /api/documents/search/status – stav Meilisearch ───────────────────
+router.get('/search/status', requireAuth, (_req, res) => {
   res.json(getStatus());
 });
 
-router.post('/search/reconnect', requireAuth, async (req, res) => {
-  if (req.user?.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
-  const available = await reconnectNow();
-  res.json({ available, ...getStatus() });
+// ── POST /api/documents/search/reconnect – okamžitý reconnect ──────────────
+router.post('/search/reconnect', requireAuth, async (_req, res) => {
+  try {
+    const ok = await reconnectNow();
+    const status = getStatus();
+    res.json({
+      ok,
+      status,
+      message: ok
+        ? 'Vyhľadávanie dokumentov je dostupné.'
+        : 'Meilisearch je nedostupný. Backend skúsi opätovné pripojenie automaticky.',
+    });
+  } catch (err) {
+    console.error('[Documents Search Reconnect Error]', err.message);
+    res.status(500).json({ error: 'Nepodarilo sa skúsiť opätovné pripojenie Meilisearch.' });
+  }
+});
+
+// ── POST /api/documents/reindex – reindex všetkých dokumentov do Meili ─────
+router.post('/reindex', requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    const { rows } = await query(`
+      WITH RECURSIVE folder_paths AS (
+        SELECT id, parent_id, name, name::text AS full_path
+        FROM doc_folders
+        WHERE parent_id IS NULL
+        UNION ALL
+        SELECT f.id, f.parent_id, f.name, (fp.full_path || ' / ' || f.name)::text AS full_path
+        FROM doc_folders f
+        JOIN folder_paths fp ON fp.id = f.parent_id
+      )
+      SELECT
+        df.id AS file_id,
+        df.folder_id,
+        df.name,
+        df.mime_type,
+        df.file_url,
+        COALESCE(fp.full_path, '') AS folder_path
+      FROM doc_files df
+      LEFT JOIN folder_paths fp ON fp.id = df.folder_id
+      ORDER BY df.id
+    `);
+
+    // Odošleme odpoveď hneď a samotné indexovanie dobehne na pozadí.
+    res.json({ ok: true, total: rows.length });
+
+    setImmediate(async () => {
+      for (const row of rows) {
+        try {
+          const absPath = urlToUploadPath(row.file_url);
+          const text = absPath ? await extractText(absPath, row.mime_type) : null;
+          await indexDocument({
+            fileId: row.file_id,
+            folderId: row.folder_id,
+            folderPath: row.folder_path,
+            name: row.name,
+            mimeType: row.mime_type,
+            text: text || '',
+            fileUrl: row.file_url,
+          });
+        } catch (err) {
+          console.warn('[Documents Reindex Warning]', row.file_id, err.message);
+        }
+      }
+    });
+  } catch (err) {
+    console.error('[Documents Reindex Error]', err.message);
+    res.status(500).json({ error: 'Nepodarilo sa spustiť reindexovanie dokumentov.' });
+  }
 });
 
 module.exports = router;

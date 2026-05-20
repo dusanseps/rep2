@@ -89,7 +89,6 @@ const SearchResultsPage = () => {
               <div class="rep-search-empty">Nenašli sa žiadne výsledky.</div>
             )}
 
-            {/* Novinky + Udalosti */}
             {other().map((result) => (
               <div class="rep-search-result" key={result.id}>
                 <div class="rep-search-meta">
@@ -103,7 +102,6 @@ const SearchResultsPage = () => {
               </div>
             ))}
 
-            {/* Dokumenty – so snippetom a zvýrazneným textom */}
             {docs().length > 0 && <h2 style={{ fontSize: '18px', fontWeight: 600, marginTop: '32px', marginBottom: '16px', color: '#1e293b' }}>Dokumenty</h2>}
             <div class="rep-search-results">
               {docs().map((result) => (

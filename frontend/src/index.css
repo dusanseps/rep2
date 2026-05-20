@@ -426,54 +426,6 @@ body {
   overflow: hidden;
 }
 
-/* ── Sidebar ──────────────────────────────────────────────────── */
-
-.rep-sidebar {
-  width: 220px;
-  min-width: 220px;
-  background: #1e293b;
-  display: flex;
-  flex-direction: column;
-  padding: 12px 0;
-  overflow-y: auto;
-  flex-shrink: 0;
-}
-
-.rep-sidebar__item {
-  display: block;
-  padding: 12px 24px;
-  color: #cbd5e1;
-  text-decoration: none;
-  font-size: 16px;
-  font-weight: 500;
-  transition: background .1s, color .1s;
-  border-left: 3px solid transparent;
-}
-
-.rep-sidebar__item:hover {
-  background: rgba(255,255,255,.07);
-  color: #f1f5f9;
-  border-left-color: #0ea5e9;
-}
-
-.rep-sidebar__item--active {
-  background: rgba(14,165,233,.15);
-  color: #fff;
-  border-left-color: #0ea5e9;
-  font-weight: 600;
-}
-
-.rep-sidebar__divider {
-  height: 1px;
-  background: rgba(255,255,255,.08);
-  margin: 8px 16px;
-}
-
-.rep-sidebar__item--edit {
-  color: #94a3b8;
-  font-size: 13px;
-}
-
 /* ── Hero ─────────────────────────────────────────────────────── */
 
 /* Nový scroll kontajner nahrádza priamu scroll logiku rep-hero */

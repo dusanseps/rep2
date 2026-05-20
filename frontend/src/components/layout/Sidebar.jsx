@@ -1,11 +1,12 @@
 /**
- * Sidebar – ľavá navigácia aplikácie REPRESENTATIVE
+ * Sidebar – navigácia aplikácie 
  */
 
 import { For } from 'solid-js';
 import { A } from '@solidjs/router';
 import { NAV_ITEMS } from '../../config/sharepoint.js';
 import { useUser } from '../../context/user.jsx';
+import styles from './Sidebar.module.css';
 
 export default function Sidebar() {
   const user = useUser();
@@ -20,12 +21,12 @@ export default function Sidebar() {
   };
 
   return (
-    <nav class="rep-sidebar" aria-label="Lokálna navigácia">
+    <nav class={styles['rep-sidebar']} aria-label="Lokálna navigácia">
       <For each={visibleItems()}>
         {(item) => (
           item.external
             ? (
-              <a href={item.href} target="_blank" rel="noopener" class="rep-sidebar__item">
+              <a href={item.href} target="_blank" rel="noopener" class={styles['rep-sidebar__item']}>
                 {item.label}
               </a>
             )
@@ -33,8 +34,8 @@ export default function Sidebar() {
               <A
                 href={item.href}
                 end={item.href === '/'}
-                activeClass="rep-sidebar__item--active"
-                class="rep-sidebar__item"
+                activeClass={styles['rep-sidebar__item--active']}
+                class={styles['rep-sidebar__item']}
               >
                 {item.label}
               </A>
