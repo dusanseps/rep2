@@ -8,6 +8,7 @@ import { useNavigate, useSearchParams } from '@solidjs/router';
 import { fetchAllEvents, createEvent, updateEvent, deleteEvent } from '../services/sp.js';
 import { useUser } from '../context/user.jsx';
 import ConfirmDialog from '../components/shared/ConfirmDialog.jsx';
+import MobileMenu from '../components/shared/MobileMenu.jsx';
 import { showErrorToast } from '../components/ui/Toasts.jsx';
 
 const API = import.meta.env.VITE_API_BASE || '/api';
@@ -273,11 +274,14 @@ export default function EventsPage() {
     <div class="rep-page">
       <div class="rep-page__header">
         <h1 class="rep-page__title">Udalosti</h1>
-        <Show when={canCreate()}>
-          <button class="rep-btn rep-btn--primary" onClick={() => setEditing({})}>
-            + Pridať udalosť
-          </button>
-        </Show>
+        <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
+          <Show when={canCreate()}>
+            <button class="rep-btn rep-btn--primary" onClick={() => setEditing({})}>
+              + Pridať udalosť
+            </button>
+          </Show>
+          <MobileMenu />
+        </div>
       </div>
 
       <div style={{ display: 'flex', gap: '8px', 'margin-bottom': '16px', 'flex-wrap': 'wrap' }}>

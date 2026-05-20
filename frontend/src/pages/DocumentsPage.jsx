@@ -1,22 +1,34 @@
 /**
  * DocumentsPage – hierarchický prehliadač dokumentov s vlastnou DB
- * Admin/Editor: plná správa priečinkov
+ * Admin: plná správa priečinkov
  * User: nahrávanie súborov a vytváranie podpriečinkov v povolených vetvách
  */
-import { createContext, createResource, createSignal, For, onCleanup, onMount, Show, useContext } from 'solid-js';
+import { createContext, createResource, createSignal, For, Show, useContext } from 'solid-js';
 import { useUser } from '../context/user.jsx';
 import { showErrorToast, showSuccessToast } from '../components/ui/Toasts.jsx';
 import ConflictRenameDialog from '../components/shared/ConflictRenameDialog.jsx';
-import DocumentDeleteConflictDialog from '../components/shared/DocumentDeleteConflictDialog.jsx';
-import { buildSuggestedName, normalizeFileName, validateFileName } from '../utils/fileNames.js';
-import '../styles/docs-conflict.css';
+import MobileMenu from '../components/shared/MobileMenu.jsx';
+import { uploadFileWithConflictHandler } from '../utils/uploadHelper.js';
 
 const API = import.meta.env.VITE_API_BASE || '/api';
 const DOC_UPLOAD_ACCEPT = '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.rar,.7z,.jpg,.jpeg,.png,.webp,.gif,.bmp,.svg,.tif,.tiff,.msg,.eml,.odt,.ods,.odp,.rtf,.xml,.json,.md';
 
+function toSafeHref(rawHref) {
+  const href = String(rawHref || '').trim();
+  if (!href) return '#';
+  if (href.startsWith('/')) return href.startsWith('//') ? '#' : href;
+  try {
+    const url = new URL(href);
+    if (url.protocol === 'http:' || url.protocol === 'https:') return href;
+  } catch (_err) {
+    return '#';
+  }
+  return '#';
+}
+
 async function fetchTree() {
   try {
-    const r = await fetch(`${API}/documents/tree`, { credentials: 'include', cache: 'no-store' });
+    const r = await fetch(`${API}/documents/tree`, { credentials: 'include' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return r.json();
   } catch (err) {
@@ -55,7 +67,7 @@ function FolderNode({ node, depth = 0, query }) {
     if (role === 'user') return Boolean(node.can_manage);
     return false;
   };
-  const canDeleteNode = () => canManageNode();
+  const canDeleteNode = () => user()?.role === 'admin' || user()?.role === 'editor';
 
   const [open, setOpen]           = createSignal(depth === 0);
   const [dragging, setDragging]   = createSignal(false);
@@ -63,8 +75,12 @@ function FolderNode({ node, depth = 0, query }) {
   const [newName, setNewName]     = createSignal('');
   const [saving, setSaving]       = createSignal(false);
   const [uploading, setUploading] = createSignal(false);
-  const [uploadConflict, setUploadConflict] = createSignal(null);
-  const [deleteConflict, setDeleteConflict] = createSignal(null);
+  
+  // Conflict resolution dialog state
+  const [showConflictDialog, setShowConflictDialog] = createSignal(false);
+  const [conflictData, setConflictData] = createSignal(null);
+  const [conflictResolver, setConflictResolver] = createSignal(null);
+  
   let nameInputRef, fileInputRef;
 
   const label = () => node.name.replace(/_/g, '\u00a0');
@@ -84,30 +100,11 @@ function FolderNode({ node, depth = 0, query }) {
   const [files, { refetch: refetchFiles }] = createResource(
     () => (open() ? node.id : null),
     async (folderId) => {
-      if (!folderId) return [];
-      try {
-        const r = await fetch(`${API}/documents/folders/${folderId}/files`, {
-          credentials: 'include',
-          cache: 'no-store',
-        });
-        if (!r.ok) return [];
-        return r.json();
-      } catch (err) {
-        console.warn('[Documents folder files] Fetch failed:', { folderId, message: err.message });
-        return [];
-      }
+      const r = await fetch(`${API}/documents/folders/${folderId}/files`, { credentials: 'include' });
+      if (!r.ok) return [];
+      return r.json();
     }
   );
-
-  onMount(() => {
-    const handleDocsUpdated = () => {
-      if (open()) refetchFiles();
-    };
-    window.addEventListener('rep:documents-updated', handleDocsUpdated);
-    onCleanup(() => {
-      window.removeEventListener('rep:documents-updated', handleDocsUpdated);
-    });
-  });
 
   const folderFileCount = () => {
     const loaded = files();
@@ -170,192 +167,53 @@ function FolderNode({ node, depth = 0, query }) {
 
   async function doUpload(filesList) {
     if (!filesList.length) return;
-
-    async function uploadSingleFile(file, { overwrite = false, fileName } = {}) {
-      const fd = new FormData();
-      fd.append('file', file);
-      if (overwrite) fd.append('overwrite', 'true');
-      if (fileName) fd.append('fileName', fileName);
-
-      const r = await fetch(`${API}/documents/folders/${node.id}/upload`, {
-        method: 'POST', credentials: 'include', body: fd,
-      });
-
-      const body = await r.json().catch((err) => {
-        console.warn('[Documents doUpload] Response parse failed:', err.message);
-        return {};
-      });
-
-      if (r.status === 409) return { ok: false, conflict: true, body };
-      if (!r.ok) return { ok: false, conflict: false, body };
-      return { ok: true, body };
-    }
-
-    function askConflict({ fileName, suggestedName, current, total }) {
-      return new Promise((resolve) => {
-        setUploadConflict({
-          fileName,
-          suggestedName,
-          current,
-          total,
-          onCancel: () => resolve({ action: 'cancel' }),
-          onOverwrite: () => resolve({ action: 'overwrite' }),
-          onRename: (nextName) => resolve({ action: 'rename', fileName: nextName }),
-        });
-      });
-    }
-
     setUploading(true);
     if (!open()) setOpen(true);
     try {
-      let uploaded = 0;
-      let overwritten = 0;
-      let skipped = 0;
-      let failed = 0;
-
-      for (let i = 0; i < filesList.length; i += 1) {
-        const file = filesList[i];
-        let targetName = normalizeFileName(file.name);
-        const initialErr = validateFileName(targetName);
-        if (initialErr) {
-          failed += 1;
-          showErrorToast(initialErr);
-          continue;
-        }
-
-        let done = false;
-        while (!done) {
-          const result = await uploadSingleFile(file, { fileName: targetName });
-
-          if (result.ok) {
-            uploaded += 1;
-            done = true;
-            continue;
+      for (const file of filesList) {
+        await uploadFileWithConflictHandler({
+          uploadUrl: `${API}/documents/folders/${node.id}/upload`,
+          file,
+          onConflict: async (data) => {
+            // Show conflict dialog and wait for user action
+            return new Promise((resolve) => {
+              setConflictData({
+                existingName: data.existingName,
+                suggestedName: data.suggestedName
+              });
+              setConflictResolver(() => resolve);
+              setShowConflictDialog(true);
+            });
+          },
+          onError: (msg) => showErrorToast(msg),
+          onSuccess: () => {
+            // Success handled after all files
           }
-
-          if (!result.conflict) {
-            failed += 1;
-            showErrorToast(result.body?.error || 'Chyba nahrávania súboru');
-            done = true;
-            continue;
-          }
-
-          const decision = await askConflict({
-            fileName: result.body?.existingName || targetName,
-            suggestedName: result.body?.suggestedName || buildSuggestedName(targetName),
-            current: i + 1,
-            total: filesList.length,
-          });
-
-          if (decision.action === 'cancel') {
-            skipped += 1;
-            done = true;
-            continue;
-          }
-
-          if (decision.action === 'rename') {
-            targetName = normalizeFileName(decision.fileName);
-            const renameErr = validateFileName(targetName);
-            if (renameErr) {
-              showErrorToast(renameErr);
-              skipped += 1;
-              done = true;
-            }
-            continue;
-          }
-
-          if (decision.action === 'overwrite') {
-            const overwriteResult = await uploadSingleFile(file, { fileName: targetName, overwrite: true });
-            if (overwriteResult.ok) {
-              overwritten += 1;
-            } else {
-              failed += 1;
-              showErrorToast(overwriteResult.body?.error || 'Nahradenie súboru zlyhalo');
-            }
-            done = true;
-          }
-        }
+        });
       }
-
       refetchFiles();
       refetch();
-
-      const summary = [];
-      if (uploaded) summary.push(`nahrané: ${uploaded}`);
-      if (overwritten) summary.push(`nahradené: ${overwritten}`);
-      if (skipped) summary.push(`zrušené: ${skipped}`);
-      if (failed) summary.push(`chyby: ${failed}`);
-
-      if (uploaded || overwritten) {
-        showSuccessToast(`Nahrávanie dokončené (${summary.join(', ')})`);
-      }
+      showSuccessToast('Súbory nahrané');
     } catch (err) {
       console.error('[Documents doUpload] Error:', err.message);
       showErrorToast('Chyba nahrávania súborov');
     } finally {
-      setUploadConflict(null);
       setUploading(false);
     }
   }
 
   async function deleteFile(fileId) {
+    if (!confirm('Naozaj zmazať súbor?')) return;
     try {
-      // Načítaj väzby na dokument
-      const r = await fetch(`${API}/documents/files/${fileId}/links`, {
-        credentials: 'include',
-      });
-      if (!r.ok) {
-        showErrorToast('Nepodarilo sa skontrolovať väzby na dokument');
-        return;
-      }
-      const { links } = await r.json();
-      
-      // Ak existujú väzby, zobraz dialóg
-      if (links && links.length > 0) {
-        setDeleteConflict({
-          fileId,
-          links,
-          onCancel: () => setDeleteConflict(null),
-          onRefresh: () => deleteFile(fileId),
-          onEditLink: (link) => {
-            // Otvori novinku alebo ticker v novom tabe
-            if (link.type === 'news') {
-              // Novinka sa otvára v modáli na stránke /novinky?view=ID
-              window.open(`/novinky?view=${link.attachmentId}`, '_blank');
-            } else if (link.type === 'ticker') {
-              // Ticker sa otvára na domovnej stránke s query param - TickerModal sa otvorí automaticky
-              window.open(`/?editTicker=${link.attachmentId}`, '_blank');
-            }
-          },
-          onDeleteDocument: async () => {
-            // Zmaž dokument
-            const delR = await fetch(`${API}/documents/files/${fileId}`, {
-              method: 'DELETE',
-              credentials: 'include',
-            });
-            if (!delR.ok) {
-              const e = await delR.json().catch(() => ({}));
-              showErrorToast(e.error || 'Chyba mazania súboru');
-              throw new Error(e.error);
-            }
-            setDeleteConflict(null);
-            refetchFiles();
-            refetch();
-            showSuccessToast('Súbor zmazaný');
-          },
-        });
-        return;
-      }
-
-      // Bez väzieb - zobraz potvrdenie a zmaž
-      if (!confirm('Naozaj zmazať súbor?')) return;
-      
-      const delR = await fetch(`${API}/documents/files/${fileId}`, {
+      const r = await fetch(`${API}/documents/files/${fileId}`, {
         method: 'DELETE',
         credentials: 'include',
       });
-      if (!delR.ok) {
-        const e = await delR.json().catch(() => ({}));
+      if (!r.ok) {
+        const e = await r.json().catch((err) => {
+          console.warn('[Documents deleteFile] Response parse failed:', err.message);
+          return {};
+        });
         showErrorToast(e.error || 'Chyba mazania súboru');
         return;
       }
@@ -369,9 +227,8 @@ function FolderNode({ node, depth = 0, query }) {
   }
 
   return (
-    <>
-      <Show when={visible()}>
-        <div class={`docs-node docs-node--depth-${Math.min(depth, 3)}`}>
+    <Show when={visible()}>
+      <div class={`docs-node docs-node--depth-${Math.min(depth, 3)}`}>
 
         {/* ── Riadok priečinka ── */}
         <div
@@ -451,7 +308,7 @@ function FolderNode({ node, depth = 0, query }) {
                   {f => (
                     <div class="docs-file">
                       <span class="docs-file__icon">{fileIcon(f.mime_type)}</span>
-                      <a class="docs-file__name" href={f.file_url} target="_blank" download={f.name}>{f.name}</a>
+                      <a class="docs-file__name" href={toSafeHref(f.file_url)} target="_blank" download={f.name}>{f.name}</a>
                       <Show when={f.file_size}>
                         <span class="docs-file__size">{formatSize(f.file_size)}</span>
                       </Show>
@@ -480,38 +337,34 @@ function FolderNode({ node, depth = 0, query }) {
 
           </div>
         </Show>
-        </div>
-      </Show>
 
-      <Show when={uploadConflict()}>
-        <ConflictRenameDialog
-          title={`Súbor už existuje (${uploadConflict().current}/${uploadConflict().total})`}
-          descriptionPrefix="V cieľovom priečinku už existuje súbor"
-          descriptionSuffix="Vyberte jednu možnosť: premenovať, zrušiť upload alebo prepísať existujúci súbor."
-          itemName={uploadConflict().fileName}
-          suggestedName={uploadConflict().suggestedName}
-          normalizeName={normalizeFileName}
-          validateName={validateFileName}
-          onRename={uploadConflict().onRename}
-          onCancel={uploadConflict().onCancel}
-          onOverwrite={uploadConflict().onOverwrite}
-          cancelLabel="Zrušiť upload"
-          overwriteLabel="Prepísať súbor"
-        />
-      </Show>
-
-      <Show when={deleteConflict()}>
-        <DocumentDeleteConflictDialog
-          links={deleteConflict().links || []}
-          userId={user()?.id}
-          userRole={user()?.role}
-          onCancel={deleteConflict().onCancel}
-          onRefresh={deleteConflict().onRefresh}
-          onEditLink={deleteConflict().onEditLink}
-          onDeleteDocument={deleteConflict().onDeleteDocument}
-        />
-      </Show>
-    </>
+        {/* Conflict Resolution Dialog */}
+        <Show when={showConflictDialog() && conflictData()}>
+          <ConflictRenameDialog
+            title="Konflikt pri nahraní súboru"
+            descriptionPrefix="Súbor"
+            descriptionSuffix="už v tomto priečinku existuje."
+            itemName={conflictData()?.existingName}
+            suggestedName={conflictData()?.suggestedName}
+            onRename={(newName) => {
+              setShowConflictDialog(false);
+              const resolver = conflictResolver();
+              if (resolver) resolver({ type: 'rename', newName });
+            }}
+            onCancel={() => {
+              setShowConflictDialog(false);
+              const resolver = conflictResolver();
+              if (resolver) resolver({ type: 'cancel' });
+            }}
+            onOverwrite={() => {
+              setShowConflictDialog(false);
+              const resolver = conflictResolver();
+              if (resolver) resolver({ type: 'overwrite' });
+            }}
+          />
+        </Show>
+      </div>
+    </Show>
   );
 }
 
@@ -525,32 +378,6 @@ export default function DocumentsPage() {
   const [rootName, setRootName]   = createSignal('');
   const [rootSaving, setRootSaving] = createSignal(false);
   let rootNameRef;
-
-  onMount(() => {
-    const handlePermissionsUpdated = () => {
-      refetch();
-    };
-
-    let docsSource;
-    try {
-      docsSource = new EventSource(`${API}/documents/subscribe`);
-      docsSource.addEventListener('message', () => {
-        refetch();
-        window.dispatchEvent(new CustomEvent('rep:documents-updated'));
-      });
-      docsSource.addEventListener('error', () => {
-        console.warn('[Documents SSE] Connection error');
-      });
-    } catch (err) {
-      console.warn('[Documents SSE] Connection failed:', err.message);
-    }
-
-    window.addEventListener('rep:permissions-updated', handlePermissionsUpdated);
-    onCleanup(() => {
-      window.removeEventListener('rep:permissions-updated', handlePermissionsUpdated);
-      if (docsSource) docsSource.close();
-    });
-  });
 
   const canManageRoots = () => user()?.role === 'admin' || user()?.role === 'editor';
 
@@ -594,6 +421,7 @@ export default function DocumentsPage() {
       <div class="rep-page">
         <div class="rep-page__header">
           <h1 class="rep-page__title">Dokumenty</h1>
+          <MobileMenu />
         </div>
 
         <div class="rep-page__content">

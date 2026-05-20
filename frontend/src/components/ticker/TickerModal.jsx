@@ -19,7 +19,7 @@ import { cleanupOrphanedFiles, getNewlyUploadedUrls } from '../../utils/uploadCl
 
 const DAY = 24 * 60 * 60 * 1000;
 
-function formatTimeToExpire(msg) {
+function humanLeft(msg) {
   if (!msg.expiresAt) return 'Bez expirácie';
   const ms = msg.expiresAt - Date.now();
   if (ms <= 0) return 'Expirované';
@@ -66,7 +66,7 @@ function flattenFolders(nodes, level = 0, out = [], showAll = true) {
   for (const n of nodes || []) {
     if (showAll || n.can_manage) {
       // Skrátenie + minimálne odsadenie pre čitateľnosť
-      const maxLen = 40; // Dlžka options label v select 
+      const maxLen = 40; // Rozumná dĺžka pre select options 
       const truncated = n.name.length > maxLen ? n.name.substring(0, maxLen - 1) + '…' : n.name;
       out.push({ id: n.id, name: n.name, label: `${' '.repeat(level)}${truncated}` });
     }
@@ -129,7 +129,7 @@ export default function TickerModal(props) {
       active.blur();
     }
     
-    // ✅ NEW: Cleanup orphaned files before closing (with error handling)
+    // Cleanup orphaned files before closing (with error handling)
     cleanupOnClose().finally(() => {
       props.onClose?.();
     });
@@ -249,7 +249,7 @@ export default function TickerModal(props) {
     setErrLink('');
     setLinkCounter('');
     setDocFolderId('');
-    // ✅ NEW: Reset original attachments tracking
+    // Reset original attachments tracking
     originalAttachments = [];
   }
 
@@ -260,7 +260,7 @@ export default function TickerModal(props) {
     setFText(m.text || '');
     setFLink(m.link || '');
     setFAttachments(m.attachments || []);
-    // ✅ NEW: Track original attachments for cleanup detection
+    // Track original attachments for cleanup detection
     originalAttachments = [...(m.attachments || [])];
     if (m.expiresDays && m.expiresDays > 0) {
       setFDays(String(m.expiresDays));
@@ -590,7 +590,7 @@ export default function TickerModal(props) {
                                 {alive ? 'Aktívna' : 'Expirovaná'}
                               </span>
                               {alive && m.expiresAt &&
-                                <span class="badge warn">~ {formatTimeToExpire(m.expiresAt)}</span>}
+                                <span class="badge warn">~ {humanLeft(m)}</span>}
                               {m.link && (
                                 <a
                                   class="badge link"

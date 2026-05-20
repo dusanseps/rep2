@@ -1,11 +1,14 @@
 /**
  * ManualPage – používateľský manuál (v príprave)
  */
+import MobileMenu from '../components/shared/MobileMenu.jsx';
+
 export default function ManualPage() {
   return (
     <div class="rep-page">
       <div class="rep-page__header">
         <h1 class="rep-page__title">Používateľský manuál</h1>
+        <MobileMenu />
       </div>
 
       <div class="rep-page__content">

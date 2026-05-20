@@ -1674,7 +1674,12 @@ select.rep-form-select:focus {
   font-weight: 600;
 }
 
-/* ── Dashboard – prepínač zobrazenia ─────────────────────────── */
+/* ── Dashboard – prepínač zobrazenia ─────────────── */
+.dash-menu-align {
+  display: flex;
+  justify-content: flex-end;
+  flex: 1;
+}
 
 .dash-view-toggle {
   display: flex;

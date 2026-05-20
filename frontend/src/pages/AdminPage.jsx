@@ -14,6 +14,7 @@ import {
   saveUserFolderPermissions,
 } from '../services/auth.js';
 import { showErrorToast, showSuccessToast } from '../components/ui/Toasts.jsx';
+import MobileMenu from '../components/shared/MobileMenu.jsx';
 
 const API = import.meta.env.VITE_API_BASE || '/api';
 const PAGE_SIZE = 20;
@@ -621,6 +622,7 @@ export default function AdminPage() {
     <div class="rep-page">
       <div class="rep-page__header">
         <h1 class="rep-page__title">Administrácia</h1>
+        <MobileMenu />
       </div>
 
       <div class="rep-page__content">

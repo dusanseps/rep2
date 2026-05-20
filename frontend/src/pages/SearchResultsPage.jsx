@@ -1,5 +1,6 @@
 import { createSignal, onMount, createEffect } from 'solid-js';
 import { A, useSearchParams } from '@solidjs/router';
+import MobileMenu from '../components/shared/MobileMenu.jsx';
 
 function getMimeIcon(mimeType) {
   if (!mimeType) return '📄';
@@ -68,6 +69,7 @@ const SearchResultsPage = () => {
     <div class="rep-page">
       <div class="rep-page__header">
         <h1 class="rep-page__title">Výsledky vyhľadávania</h1>
+        <MobileMenu />
       </div>
 
       <div class="rep-page__content">
