@@ -1250,7 +1250,7 @@ select.rep-form-select:focus {
 }
 
 @media (max-width: 900px) {
-  .rep-page { padding: 16px 16px; }
+  .rep-page { padding: 24px 32px; }
   .news-page-grid { grid-template-columns: 1fr; }
   .rep-drawer { width: 100vw; }
 }

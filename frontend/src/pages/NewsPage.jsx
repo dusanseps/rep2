@@ -254,7 +254,7 @@ function NewsForm({ item, onSave, onClose }) {
     <div class="rep-overlay" onClick={e => { if (e.target === e.currentTarget) requestClose(); }}>
       <div class="rep-drawer">
         <div class="rep-drawer__header">
-          <h2 class="rep-drawer__title">{item.id ? 'Upraviť novinku' : 'Nová novinku'}</h2>
+          <h2 class="rep-drawer__title">{item.id ? 'Upraviť novinku' : 'Nová novinka'}</h2>
           <div style={{ display: 'flex', gap: '8px' }}>
             <button type="button" class="rep-btn rep-btn--ghost rep-btn--sm" onClick={requestClose}>Zrušiť</button>
             <button type="submit" form="news-form" class="rep-btn rep-btn--primary rep-btn--sm" disabled={saving() || uploading()}>
@@ -271,12 +271,12 @@ function NewsForm({ item, onSave, onClose }) {
 
           <div class="rep-form__row">
             <label class="rep-form__label">Krátky popis</label>
-            <textarea class="rep-form__input" name="description" rows="3" placeholder="Krátky popis novinky…">{item.description || ''}</textarea>
+            <textarea class="rep-form__input" name="description" rows="2" placeholder="Krátky popis novinky…">{item.description || ''}</textarea>
           </div>
 
           <div class="rep-form__row">
             <label class="rep-form__label">Obsah</label>
-            <textarea class="rep-form__input" name="content" rows="7" placeholder="Plný text novinky…">{item.content || ''}</textarea>
+            <textarea class="rep-form__input" name="content" rows="5" placeholder="Plný text novinky…">{item.content || ''}</textarea>
           </div>
 
           <div class="rep-form__row">
@@ -420,7 +420,7 @@ export default function NewsPage() {
     <div class="rep-page">
       <div class="rep-page__header">
         <h1 class="rep-page__title">Novinky</h1>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
           <Show when={canEdit()}>
             <button class="rep-btn rep-btn--primary" onClick={() => setEditing({})}>
               + Pridať novinku
