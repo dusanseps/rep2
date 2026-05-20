@@ -661,15 +661,15 @@ export default function AdminPage() {
         </Show>
       </div>
 
-      <div class="rep-page__content" style={{ marginTop: '16px' }}>
-        <div class="rep-page__info" style={{ marginBottom: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px' }}>
+      <div class="rep-page__content" style={{ 'margin-top': '16px' }}>
+        <div class="rep-page__info" style={{ 'margin-bottom': 0, display: 'flex', 'justify-content': 'space-between', 'align-items': 'center', gap: '16px' }}>
           <div>
             <strong>Reindexovanie dokumentov</strong>
-            <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: 'inherit', opacity: 0.85 }}>
+            <p style={{ margin: '4px 0 0 0', 'font-size': '14px', color: 'inherit', opacity: 0.85 }}>
               Re-indexovať existujúce dokumenty z databázy do vyhľadávacieho indexu (pre dokumenty nahrané pred aktiváciou vyhľadávania). Trvá pár sekúnd až minút (závisí od počtu/veľkosti dokumentov). 
             </p>
             <Show when={reindexResult()}>
-              <p style={{ margin: '8px 0 0 0', fontSize: '12px', color: 'inherit', opacity: 0.75 }}>
+              <p style={{ margin: '8px 0 0 0', 'font-size': '12px', color: 'inherit', opacity: 0.75 }}>
                 {reindexStatus()}
               </p>
             </Show>
@@ -678,33 +678,33 @@ export default function AdminPage() {
             class="rep-btn rep-btn--primary"
             onClick={startReindex}
             disabled={reindexing()}
-            style={{ whiteSpace: 'nowrap', flexShrink: 0 }}
+            style={{ 'white-space': 'nowrap', 'flex-shrink': 0 }}
           >
             {reindexing() ? 'Spúšťam...' : 'Reindexovať'}
           </button>
         </div>
       </div>
 
-      <div class="rep-page__content" style={{ marginTop: '16px' }}>
-        <div class="rep-page__info" style={{ marginBottom: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px' }}>
+      <div class="rep-page__content" style={{ 'margin-top': '16px' }}>
+        <div class="rep-page__info" style={{ 'margin-bottom': 0, display: 'flex', 'justify-content': 'space-between', 'align-items': 'center', gap: '16px' }}>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
               <strong>Stav full-text vyhľadávania dokumentov</strong>
               <span
                 style={{
                   display: 'inline-flex',
-                  alignItems: 'center',
+                  'align-items': 'center',
                   padding: '2px 10px',
                   borderRadius: '999px',
-                  fontSize: '12px',
-                  fontWeight: 600,
+                  'font-size': '12px',
+                  'font-weight': 600,
                   ...searchStatusBadge().style,
                 }}
               >
                 {searchStatusBadge().label}
               </span>
             </div>
-            <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: 'inherit', opacity: 0.85 }}>
+            <p style={{ margin: '4px 0 0 0', 'font-size': '14px', color: 'inherit', opacity: 0.85 }}>
               <Show
                 when={searchEngineStatus()}
                 fallback={searchEngineLoading() ? 'Načítavam stav vyhľadávania…' : 'Stav vyhľadávania sa nepodarilo zistiť.'}
@@ -719,7 +719,7 @@ export default function AdminPage() {
               </Show>
             </p>
             <Show when={searchEngineStatus() && !searchEngineStatus().available && searchEngineStatus().lastError}>
-              <p style={{ margin: '8px 0 0 0', fontSize: '12px', color: 'inherit', opacity: 0.75 }}>
+              <p style={{ margin: '8px 0 0 0', 'font-size': '12px', color: 'inherit', opacity: 0.75 }}>
                 Posledná chyba: {searchEngineStatus().lastError}
               </p>
             </Show>
@@ -728,7 +728,7 @@ export default function AdminPage() {
             class="rep-btn rep-btn--ghost"
             onClick={reconnectSearchEngine}
             disabled={searchEngineRetrying()}
-            style={{ whiteSpace: 'nowrap', flexShrink: 0 }}
+            style={{ 'white-space': 'nowrap', 'flex-shrink': 0 }}
           >
             {searchEngineRetrying() ? 'Skúšam...' : 'Skúsiť pripojiť teraz'}
           </button>

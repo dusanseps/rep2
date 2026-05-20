@@ -74,7 +74,7 @@ const SearchResultsPage = () => {
 
       <div class="rep-page__content">
         {query() && (
-          <div style={{ color: '#64748b', fontSize: '14px', marginBottom: '20px', paddingBottom: '12px' }}>
+          <div style={{ color: '#64748b', 'font-size': '14px', 'margin-bottom': '20px', 'padding-bottom': '12px' }}>
             Hľadáte: <strong>„{query()}"</strong>
             {searched() && !loading() && (
               <> — <span style={{ color: results().length ? '#0ea5e9' : '#94a3b8' }}>{results().length} výsledkov</span></>
@@ -104,7 +104,7 @@ const SearchResultsPage = () => {
               </div>
             ))}
 
-            {docs().length > 0 && <h2 style={{ fontSize: '18px', fontWeight: 600, marginTop: '32px', marginBottom: '16px', color: '#1e293b' }}>Dokumenty</h2>}
+            {docs().length > 0 && <h2 style={{ 'font-size': '18px', 'font-weight': 600, 'margin-top': '32px', 'margin-bottom': '16px', color: '#1e293b' }}>Dokumenty</h2>}
             <div class="rep-search-results">
               {docs().map((result) => (
                 <div class="rep-search-result rep-search-result--doc" key={result.id}>
@@ -114,13 +114,13 @@ const SearchResultsPage = () => {
                     </span>
                     <span class="rep-search-path">{result.path}</span>
                   </div>
-                  <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <h3 style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
                     <A href={result.href || '/'}>{result.title}</A>
                     {result.file_url && (
                       <button
                         class="rep-search-open-btn"
                         title="Otvoriť v novom okne"
-                        style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '20px', padding: '4px 8px', lineHeight: '1' }}
+                        style={{ border: 'none', background: 'none', cursor: 'pointer', 'font-size': '20px', padding: '4px 8px', 'line-height': '1' }}
                         onClick={e => { e.preventDefault(); e.stopPropagation(); window.open(`/api/documents/files/${result.id.replace('doc_', '')}/view`, '_blank'); }}
                       >↗</button>
                     )}
@@ -129,7 +129,7 @@ const SearchResultsPage = () => {
                     <p class="rep-search-snippet" innerHTML={result.snippet} />
                   )}
                   {!result.snippet && (
-                    <p style={{ color: '#94a3b8', fontStyle: 'italic', fontSize: '13px' }}>
+                    <p style={{ color: '#94a3b8', 'font-style': 'italic', 'font-size': '13px' }}>
                       Zhoda v názve súboru alebo priečinka
                     </p>
                   )}

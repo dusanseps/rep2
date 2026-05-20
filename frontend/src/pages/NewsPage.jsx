@@ -439,7 +439,7 @@ export default function NewsPage() {
         </Show>
         <button class={`rep-btn rep-btn--sm ${newsFilter() === 'my-drafts' ? 'rep-btn--primary' : 'rep-btn--ghost'}`} onClick={() => setNewsFilter('my-drafts')}>Moje drafty ({countMyDrafts()})</button>
       </div>
-      <div class="rep-page__content" style={{ paddingTop: '20px' }}>
+      <div class="rep-page__content" style={{ 'padding-top': '20px' }}>
         <Suspense fallback={<p class="rep-page__loading">Načítavam…</p>}>
           <Show when={!news.error} fallback={
             <div class="rep-panel__error">
