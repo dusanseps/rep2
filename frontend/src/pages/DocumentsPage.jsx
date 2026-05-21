@@ -3,7 +3,7 @@
  * Admin: plná správa priečinkov
  * User: nahrávanie súborov a vytváranie podpriečinkov v povolených vetvách
  */
-import { createContext, createResource, createSignal, For, Show, useContext } from 'solid-js';
+import { createContext, createResource, createSignal, For, onCleanup, onMount, Show, useContext } from 'solid-js';
 import { useUser } from '../context/user.jsx';
 import { showErrorToast, showSuccessToast } from '../components/ui/Toasts.jsx';
 import ConflictRenameDialog from '../components/shared/ConflictRenameDialog.jsx';
@@ -60,7 +60,7 @@ const DocsCtx = createContext();
 // ── Rekurzívny uzol stromu ────────────────────────────────────────────────────
 
 function FolderNode({ node, depth = 0, query }) {
-  const { user, refetch } = useContext(DocsCtx);
+  const { user, refetch, filesVersion } = useContext(DocsCtx);
   const canManageNode = () => {
     const role = user()?.role;
     if (role === 'admin' || role === 'editor') return true;
@@ -98,9 +98,10 @@ function FolderNode({ node, depth = 0, query }) {
 
   // Lazy-load súborov keď je priečinok otvorený
   const [files, { refetch: refetchFiles }] = createResource(
-    () => (open() ? node.id : null),
-    async (folderId) => {
-      const r = await fetch(`${API}/documents/folders/${folderId}/files`, { credentials: 'include' });
+    () => (open() ? `${node.id}:${filesVersion()}` : null),
+    async (key) => {
+      const [folderIdStr] = key.split(':');
+      const r = await fetch(`${API}/documents/folders/${folderIdStr}/files`, { credentials: 'include' });
       if (!r.ok) return [];
       return r.json();
     }
@@ -379,6 +380,22 @@ export default function DocumentsPage() {
   const [rootSaving, setRootSaving] = createSignal(false);
   let rootNameRef;
 
+  const [filesVersion, setFilesVersion] = createSignal(0);
+
+  onMount(() => {
+    const es = new EventSource(`${API}/documents/subscribe`, { withCredentials: true });
+    es.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        refetch();
+        if (msg.type === 'file_upload' || msg.type === 'file_delete') {
+          setFilesVersion(v => v + 1);
+        }
+      } catch (_) {}
+    };
+    onCleanup(() => es.close());
+  });
+
   const canManageRoots = () => user()?.role === 'admin' || user()?.role === 'editor';
 
   const totalFolders = () => {
@@ -417,7 +434,7 @@ export default function DocumentsPage() {
   }
 
   return (
-    <DocsCtx.Provider value={{ user, refetch }}>
+    <DocsCtx.Provider value={{ user, refetch, filesVersion }}>
       <div class="rep-page">
         <div class="rep-page__header">
           <h1 class="rep-page__title">Dokumenty</h1>

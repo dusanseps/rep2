@@ -434,10 +434,12 @@ router.patch('/:id', requireAuth, async (req, res) => {
     const ownerCheck = await query('SELECT created_by FROM news WHERE id = $1', [req.params.id]);
     if (!ownerCheck.rows[0]) return res.status(404).json({ error: 'Novinka nenájdená.' });
     const isOwner = ownerCheck.rows[0].created_by === req.user.id;
-    const isAdmin = req.user.role === 'admin';
-    if (!isOwner && !isAdmin) return res.status(403).json({ error: 'Nemáte oprávnenie upraviť túto novinku.' });
+    if (!isOwner && req.user.role !== 'admin') {
+      logger.warn('NEWS_UPDATE_UNAUTHORIZED', { userId: req.user.id, username: req.user.username, newsId: Number(req.params.id) });
+      return res.status(403).json({ error: 'Nemáte oprávnenie upraviť túto novinku.' });
+    }
 
-    // ✅ Spravená logika: ak je is_published true, published_at = NOW(); ak false, published_at = NULL
+    // Ak je is_published true, published_at = NOW(); ak false, published_at = NULL
     const newPublishedAt = is_published ? (published_at || new Date().toISOString()) : null;
 
     const result = await query(`
@@ -494,8 +496,10 @@ router.delete('/:id', requireAuth, async (req, res) => {
     const ownerCheck = await query('SELECT created_by FROM news WHERE id = $1', [req.params.id]);
     if (!ownerCheck.rows[0]) return res.status(404).json({ error: 'Novinka nenájdená.' });
     const isOwner = ownerCheck.rows[0].created_by === req.user.id;
-    const isAdmin = req.user.role === 'admin';
-    if (!isOwner && !isAdmin) return res.status(403).json({ error: 'Nemáte oprávnenie zmazať túto novinku.' });
+    if (!isOwner && req.user.role !== 'admin') {
+      logger.warn('NEWS_DELETE_UNAUTHORIZED', { userId: req.user.id, username: req.user.username, newsId: Number(req.params.id) });
+      return res.status(403).json({ error: 'Nemáte oprávnenie zmazať túto novinku.' });
+    }
 
     await query('DELETE FROM news WHERE id = $1', [req.params.id]);
     broadcastNewsUpdate('delete', { id: req.params.id });

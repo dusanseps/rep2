@@ -14,6 +14,20 @@ const logger  = require('../utils/logger');
 
 const router = express.Router();
 
+// SSE klienti pripojení na real-time updaty
+const sseClients = new Set();
+
+function broadcastDocumentsUpdate(type, payload = {}) {
+  const data = JSON.stringify({ type, ...payload });
+  sseClients.forEach(res => {
+    try {
+      res.write(`data: ${data}\n\n`);
+    } catch (_) {
+      sseClients.delete(res);
+    }
+  });
+}
+
 const UPLOAD_DIR = path.join(__dirname, '..', 'public', 'uploads');
 const DOCS_ROOT_PREFIX = 'documents';
 const ALLOWED_EXT = [
@@ -178,6 +192,26 @@ const uploadDoc = multer({
   },
 });
 
+// ── GET /api/documents/subscribe – SSE real-time updates ──────────────────
+router.get('/subscribe', requireAuth, (req, res) => {
+  logger.http('DOCUMENTS_SSE_CONNECT', { userId: req.user.id, username: req.user.username });
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  sseClients.add(res);
+  res.write(':connected\n\n');
+  const keepAliveInterval = setInterval(() => {
+    try { res.write(':\n\n'); }
+    catch (e) { clearInterval(keepAliveInterval); sseClients.delete(res); }
+  }, 30000);
+  req.on('close', () => {
+    logger.http('DOCUMENTS_SSE_DISCONNECT', { userId: req.user.id, username: req.user.username });
+    clearInterval(keepAliveInterval);
+    sseClients.delete(res);
+  });
+});
+
 // ── GET /api/documents/tree – celý strom priečinkov ─────────────────────────
 router.get('/tree', requireAuth, async (req, res) => {
   try {
@@ -262,6 +296,7 @@ router.post('/folders', requireAuth, async (req, res) => {
       VALUES ($1, $2, $3, $4, $5) RETURNING *
     `, [name.trim(), parent_id || null, description || null, sort_order || 0, req.user.id]);
     logger.info('FOLDER_CREATE', { userId: req.user.id, username: req.user.username, folderId: rows[0].id, name: rows[0].name, parentId: rows[0].parent_id });
+    broadcastDocumentsUpdate('folder_create', { folderId: rows[0].id, parentId: rows[0].parent_id });
     res.status(201).json(rows[0]);
   } catch (err) {
     logger.error('FOLDER_CREATE_ERROR', { message: err.message });
@@ -279,6 +314,7 @@ router.patch('/folders/:id', requireAuth, requireEditor, async (req, res) => {
     `, [name, description || null, req.params.id]);
     if (!rows[0]) return res.status(404).json({ error: 'Priečinok neexistuje.' });
     logger.info('FOLDER_UPDATE', { userId: req.user.id, username: req.user.username, folderId: Number(req.params.id), name: rows[0].name });
+    broadcastDocumentsUpdate('folder_update', { folderId: Number(req.params.id) });
     res.json(rows[0]);
   } catch (err) {
     logger.error('FOLDER_UPDATE_ERROR', { message: err.message });
@@ -302,6 +338,7 @@ router.delete('/folders/:id', requireAuth, requireEditor, async (req, res) => {
       if (fp) fs.unlink(fp, () => {});
     }
     logger.info('FOLDER_DELETE', { userId: req.user.id, username: req.user.username, folderId: Number(req.params.id), filesDeleted: files.length });
+    broadcastDocumentsUpdate('folder_delete', { folderId: Number(req.params.id) });
     res.status(204).end();
   } catch (err) {
     logger.error('FOLDER_DELETE_ERROR', { message: err.message });
@@ -392,6 +429,7 @@ router.post('/folders/:id/upload', requireAuth,
           fs.unlink(oldPath, () => {});
         }
         logger.info('FILE_OVERWRITE', { userId: req.user.id, username: req.user.username, fileId: rows[0].id, name: requestedName, folderId, size: req.file.size });
+        broadcastDocumentsUpdate('file_upload', { folderId, fileId: rows[0].id });
       } else {
         ({ rows } = await query(
           `INSERT INTO doc_files (folder_id, name, file_url, file_size, mime_type, uploaded_by)
@@ -406,6 +444,7 @@ router.post('/folders/:id/upload', requireAuth,
           ]
         ));
         logger.info('FILE_UPLOAD', { userId: req.user.id, username: req.user.username, fileId: rows[0].id, name: requestedName, folderId, size: req.file.size });
+        broadcastDocumentsUpdate('file_upload', { folderId, fileId: rows[0].id });
       }
       res.status(201).json(rows[0]);
     } catch (err) {
@@ -426,7 +465,7 @@ router.post('/folders/:id/upload', requireAuth,
 router.delete('/files/:id', requireAuth, requireEditor, async (req, res) => {
   try {
     const { rows } = await query(
-      'DELETE FROM doc_files WHERE id = $1 RETURNING file_url',
+      'DELETE FROM doc_files WHERE id = $1 RETURNING file_url, folder_id',
       [req.params.id]
     );
     if (rows[0]?.file_url) {
@@ -434,6 +473,7 @@ router.delete('/files/:id', requireAuth, requireEditor, async (req, res) => {
       if (fp) fs.unlink(fp, () => {});
     }
     logger.info('FILE_DELETE', { userId: req.user.id, username: req.user.username, fileId: Number(req.params.id) });
+    broadcastDocumentsUpdate('file_delete', { folderId: rows[0]?.folder_id, fileId: Number(req.params.id) });
     res.status(204).end();
   } catch (err) {
     logger.error('FILE_DELETE_ERROR', { message: err.message });

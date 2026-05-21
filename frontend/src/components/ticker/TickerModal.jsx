@@ -752,24 +752,24 @@ export default function TickerModal(props) {
             </div>
           </div>
         </div>
-      </div>
 
-      <Show when={attachmentConflict()}>
-        <ConflictRenameDialog
-          title={`Súbor už existuje (${attachmentConflict().current}/${attachmentConflict().total})`}
-          descriptionPrefix="V cieľovom priečinku už existuje súbor"
-          descriptionSuffix="Vyberte jednu možnosť: premenovať, zrušiť upload alebo prepísať existujúci súbor."
-          itemName={attachmentConflict().fileName}
-          suggestedName={attachmentConflict().suggestedName}
-          normalizeName={normalizeFileName}
-          validateName={validateFileName}
-          onRename={attachmentConflict().onRename}
-          onCancel={attachmentConflict().onCancel}
-          onOverwrite={attachmentConflict().onOverwrite}
-          cancelLabel="Zrušiť upload"
-          overwriteLabel="Prepísať súbor"
-        />
-      </Show>
+        <Show when={attachmentConflict()}>
+          <ConflictRenameDialog
+            title={`Súbor už existuje (${attachmentConflict().current}/${attachmentConflict().total})`}
+            descriptionPrefix="V cieľovom priečinku už existuje súbor"
+            descriptionSuffix="Vyberte jednu možnosť: premenovať, zrušiť upload alebo prepísať existujúci súbor."
+            itemName={attachmentConflict().fileName}
+            suggestedName={attachmentConflict().suggestedName}
+            normalizeName={normalizeFileName}
+            validateName={validateFileName}
+            onRename={attachmentConflict().onRename}
+            onCancel={attachmentConflict().onCancel}
+            onOverwrite={attachmentConflict().onOverwrite}
+            cancelLabel="Zrušiť upload"
+            overwriteLabel="Prepísať súbor"
+          />
+        </Show>
+      </div>
     </>
   );
 }

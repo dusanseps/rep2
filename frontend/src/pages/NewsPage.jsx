@@ -373,6 +373,7 @@ export default function NewsPage() {
   const [newsFilter, setNewsFilter] = createSignal('all'); // Filter: all, published, my-published, drafts, my-drafts
 
   const canEdit = () => ['admin', 'editor'].includes(user()?.role);
+  const canCreate = () => ['admin', 'editor', 'user'].includes(user()?.role);
   const userId = () => user()?.id;
   const isAdmin = () => ['admin', 'editor'].includes(user()?.role);
 
@@ -421,7 +422,7 @@ export default function NewsPage() {
       <div class="rep-page__header">
         <h1 class="rep-page__title">Novinky</h1>
         <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
-          <Show when={canEdit()}>
+          <Show when={canCreate()}>
             <button class="rep-btn rep-btn--primary" onClick={() => setEditing({})}>
               + Pridať novinku
             </button>
@@ -454,7 +455,7 @@ export default function NewsPage() {
                 <For each={filteredNews()}>{item => (
                   <NewsCard
                     item={item}
-                    canEdit={canEdit()}
+                    canEdit={user()?.role === 'admin' || String(item.createdById) === String(userId())}
                     onView={() => navigate(`/novinky?view=${item.id}`)}
                     onEdit={() => setEditing(item)}
                     onDelete={() => setToDelete(item.id)}
