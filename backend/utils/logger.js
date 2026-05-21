@@ -2,17 +2,15 @@
 
 /**
  * Winston logger – centrálna konfigurácia logovania
- *
- * Súbory:  backend/logs/app-YYYY-MM-DD.log  (JSON, rotácia denne, 30 dní, max 50 MB)
  * Konzola: iba v development (NODE_ENV !== 'production'), farebný text
  */
 
 const { createLogger, format, transports } = require('winston');
-const DailyRotateFile = require('winston-daily-rotate-file');
 const path = require('path');
 const fs   = require('fs');
 
-const LOG_DIR = path.join(__dirname, '..', 'logs');
+const LOG_DIR  = path.resolve(__dirname, '..', process.env.LOG_DIR);
+const LOG_FILE = path.join(LOG_DIR, `${process.env.LOG_FILENAME}.log`);
 fs.mkdirSync(LOG_DIR, { recursive: true });
 
 // ── Formát pre súbory: JSON s časovou pečiatkou ──────────────────────────────
@@ -41,14 +39,9 @@ const consoleFormat = format.combine(
 const logger = createLogger({
   level: 'http',
   transports: [
-    new DailyRotateFile({
-      dirname:      LOG_DIR,
-      filename:     'app-%DATE%.log',
-      datePattern:  'YYYY-MM-DD',
-      zippedArchive: true,
-      maxSize:      '50m',
-      maxFiles:     '30d',
-      format:       fileFormat,
+    new transports.File({
+      filename: LOG_FILE,
+      format:   fileFormat,
     }),
   ],
 });
