@@ -4,7 +4,7 @@
  * Auth: JWT v httpOnly cookie
  */
 
-require('dotenv').config({ path: require('path').join(__dirname, '.env') });
+require('dotenv').config({ path: '/etc/rep2/.env' });
 const express         = require('express');
 const path            = require('path');
 const cookieParser    = require('cookie-parser');

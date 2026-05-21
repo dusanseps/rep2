@@ -75,6 +75,10 @@ function FolderNode({ node, depth = 0, query }) {
   const [newName, setNewName]     = createSignal('');
   const [saving, setSaving]       = createSignal(false);
   const [uploading, setUploading] = createSignal(false);
+  const [renamingFileId, setRenamingFileId] = createSignal(null);
+  const [renameValue, setRenameValue] = createSignal('');
+  const [renamingFolder, setRenamingFolder] = createSignal(false);
+  const [renameFolderValue, setRenameFolderValue] = createSignal('');
   
   // Conflict resolution dialog state
   const [showConflictDialog, setShowConflictDialog] = createSignal(false);
@@ -227,6 +231,54 @@ function FolderNode({ node, depth = 0, query }) {
     }
   }
 
+  async function renameFile(fileId, newName) {
+    const trimmed = newName.trim();
+    if (!trimmed) return;
+    try {
+      const r = await fetch(`${API}/documents/files/${fileId}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        showErrorToast(e.error || 'Chyba premenovania súboru');
+        return;
+      }
+      setRenamingFileId(null);
+      refetchFiles();
+      showSuccessToast('Súbor premenovaný');
+    } catch (err) {
+      console.error('[Documents renameFile] Error:', err.message);
+      showErrorToast('Chyba premenovania súboru');
+    }
+  }
+
+  async function renameFolder(newName) {
+    const trimmed = newName.trim();
+    if (!trimmed) return;
+    try {
+      const r = await fetch(`${API}/documents/folders/${node.id}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        showErrorToast(e.error || 'Chyba premenovania priečinka');
+        return;
+      }
+      setRenamingFolder(false);
+      refetch();
+      showSuccessToast('Priečinok premenovaný');
+    } catch (err) {
+      console.error('[Documents renameFolder] Error:', err.message);
+      showErrorToast('Chyba premenovania priečinka');
+    }
+  }
+
   return (
     <Show when={visible()}>
       <div class={`docs-node docs-node--depth-${Math.min(depth, 3)}`}>
@@ -245,9 +297,27 @@ function FolderNode({ node, depth = 0, query }) {
         >
           <span class="docs-node__toggle">{shouldOpen() ? '▾' : '▸'}</span>
           <span class="docs-node__icon">{shouldOpen() ? '📂' : '📁'}</span>
-          <span class="docs-node__label">{label()}</span>
-          <Show when={folderFileCount() > 0}>
-            <span class="docs-node__file-count">({folderFileCount()})</span>
+          <Show when={renamingFolder()} fallback={<>
+            <span class="docs-node__label">{label()}</span>
+            <Show when={folderFileCount() > 0}>
+              <span class="docs-node__file-count">({folderFileCount()})</span>
+            </Show>
+          </>}>
+            <input
+              class="docs-addfolder__input"
+              style={{ flex: 1, 'min-width': 0 }}
+              value={renameFolderValue()}
+              ref={el => setTimeout(() => el?.focus(), 0)}
+              onClick={e => e.stopPropagation()}
+              onInput={e => setRenameFolderValue(e.target.value)}
+              onKeyDown={e => {
+                e.stopPropagation();
+                if (e.key === 'Enter') renameFolder(renameFolderValue());
+                if (e.key === 'Escape') { e.preventDefault(); setRenamingFolder(false); }
+              }}
+            />
+            <button class="docs-addfolder__btn docs-addfolder__btn--ok" onClick={e => { e.stopPropagation(); renameFolder(renameFolderValue()); }}>✓</button>
+            <button class="docs-addfolder__btn docs-addfolder__btn--cancel" onClick={e => { e.stopPropagation(); setRenamingFolder(false); }}>✕</button>
           </Show>
           <Show when={uploading()}>
             <span class="docs-node__uploading">↑</span>
@@ -261,6 +331,11 @@ function FolderNode({ node, depth = 0, query }) {
                 title="Pridať podpriečinok"
                 onClick={() => { setAddingChild(a => !a); setOpen(true); setTimeout(() => nameInputRef?.focus(), 50); }}
               >+📁</button>
+              <button
+                class="docs-action-btn"
+                title="Premenovať priečinok"
+                onClick={() => { setRenamingFolder(true); setRenameFolderValue(node.name); }}
+              >✏️</button>
               <label class="docs-action-btn docs-action-btn--upload" title="Nahrať súbory">
                 📎
                 <input type="file" multiple ref={fileInputRef} style="display:none"
@@ -309,12 +384,32 @@ function FolderNode({ node, depth = 0, query }) {
                   {f => (
                     <div class="docs-file">
                       <span class="docs-file__icon">{fileIcon(f.mime_type)}</span>
-                      <a class="docs-file__name" href={toSafeHref(f.file_url)} target="_blank" download={f.name}>{f.name}</a>
-                      <Show when={f.file_size}>
-                        <span class="docs-file__size">{formatSize(f.file_size)}</span>
-                      </Show>
-                      <Show when={canDeleteNode()}>
-                        <button class="docs-file__del" title="Zmazať súbor" onClick={() => deleteFile(f.id)}>🗑</button>
+                      <Show when={renamingFileId() === f.id} fallback={<>
+                        <a class="docs-file__name" href={toSafeHref(f.file_url)} target="_blank" download={f.name}>{f.name}</a>
+                        <Show when={f.file_size}>
+                          <span class="docs-file__size">{formatSize(f.file_size)}</span>
+                        </Show>
+                        <Show when={canManageNode()}>
+                          <button class="docs-file__ren" title="Premenovať súbor" onClick={() => { setRenamingFileId(f.id); setRenameValue(f.name); }}>✏️</button>
+                        </Show>
+                        <Show when={canDeleteNode()}>
+                          <button class="docs-file__del" title="Zmazať súbor" onClick={() => deleteFile(f.id)}>🗑</button>
+                        </Show>
+                      </>}>
+                        <input
+                          class="docs-addfolder__input"
+                          style={{ flex: 1, 'min-width': 0 }}
+                          value={renameValue()}
+                          ref={el => setTimeout(() => el?.focus(), 0)}
+                          onInput={e => setRenameValue(e.target.value)}
+                          onKeyDown={e => {
+                            e.stopPropagation();
+                            if (e.key === 'Enter') renameFile(f.id, renameValue());
+                            if (e.key === 'Escape') { e.preventDefault(); setRenamingFileId(null); }
+                          }}
+                        />
+                        <button class="docs-addfolder__btn docs-addfolder__btn--ok" onClick={() => renameFile(f.id, renameValue())}>✓</button>
+                        <button class="docs-addfolder__btn docs-addfolder__btn--cancel" onClick={() => setRenamingFileId(null)}>✕</button>
                       </Show>
                     </div>
                   )}

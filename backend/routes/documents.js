@@ -305,13 +305,16 @@ router.post('/folders', requireAuth, async (req, res) => {
 });
 
 // ── PATCH /api/documents/folders/:id ────────────────────────────────────────
-router.patch('/folders/:id', requireAuth, requireEditor, async (req, res) => {
+router.patch('/folders/:id', requireAuth, async (req, res) => {
   const { name, description } = req.body || {};
+  if (!name?.trim()) return res.status(400).json({ error: 'Povinné pole: name.' });
   try {
+    const allowed = await assertFolderAccess(req, res, req.params.id);
+    if (!allowed) return;
     const { rows } = await query(`
       UPDATE doc_folders SET name=$1, description=$2, updated_at=NOW()
       WHERE id=$3 RETURNING *
-    `, [name, description || null, req.params.id]);
+    `, [name.trim(), description || null, req.params.id]);
     if (!rows[0]) return res.status(404).json({ error: 'Priečinok neexistuje.' });
     logger.info('FOLDER_UPDATE', { userId: req.user.id, username: req.user.username, folderId: Number(req.params.id), name: rows[0].name });
     broadcastDocumentsUpdate('folder_update', { folderId: Number(req.params.id) });
@@ -460,6 +463,42 @@ router.post('/folders/:id/upload', requireAuth,
     }
   }
 );
+
+// ── PATCH /api/documents/files/:id – premenovanie súboru ─────────────────────
+router.patch('/files/:id', requireAuth, async (req, res) => {
+  const newName = normalizeRequestedFileName(req.body?.name, '');
+  if (!newName) return res.status(400).json({ error: 'Povinné pole: name.' });
+  try {
+    const { rows: fileRows } = await query(
+      'SELECT id, name, folder_id FROM doc_files WHERE id = $1',
+      [req.params.id]
+    );
+    if (!fileRows[0]) return res.status(404).json({ error: 'Súbor neexistuje.' });
+
+    const folderId = fileRows[0].folder_id;
+    const allowed = await assertFolderAccess(req, res, folderId);
+    if (!allowed) return;
+
+    const { rows: conflict } = await query(
+      'SELECT id FROM doc_files WHERE folder_id = $1 AND LOWER(name) = LOWER($2) AND id != $3',
+      [folderId, newName, req.params.id]
+    );
+    if (conflict[0]) {
+      return res.status(409).json({ error: 'Súbor s rovnakým názvom už v priečinku existuje.' });
+    }
+
+    const { rows } = await query(
+      'UPDATE doc_files SET name = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
+      [newName, req.params.id]
+    );
+    logger.info('FILE_RENAME', { userId: req.user.id, username: req.user.username, fileId: Number(req.params.id), oldName: fileRows[0].name, newName, folderId });
+    broadcastDocumentsUpdate('file_upload', { folderId, fileId: Number(req.params.id) });
+    res.json(rows[0]);
+  } catch (err) {
+    logger.error('FILE_RENAME_ERROR', { message: err.message });
+    res.status(500).json({ error: 'Nepodarilo sa premenovať súbor. Skúste prosím neskôr.' });
+  }
+});
 
 // ── DELETE /api/documents/files/:id ──────────────────────────────────────────
 router.delete('/files/:id', requireAuth, requireEditor, async (req, res) => {

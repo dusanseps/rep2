@@ -317,6 +317,7 @@ router.put('/users/:username/folder-permissions', requireAuth, requireAdmin, asy
       targetUserId: userId,
       readAccess,
       assignmentsCount: selected.length,
+      folderIds: selected,
     });
 
     return res.json({ ok: true });

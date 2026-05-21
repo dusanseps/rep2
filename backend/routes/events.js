@@ -149,6 +149,7 @@ router.patch('/:id', requireAuth, async (req, res) => {
     broadcastEventsUpdate('update', updated);
     logger.info('EVENT_UPDATE', { userId: req.user.id, username: req.user.username, eventId: updated.id, title: updated.title });
   } catch (err) {
+    logger.error('EVENT_UPDATE_ERROR', { message: err.message });
     res.status(500).json({ error: 'Chyba.' });
   }
 });
@@ -169,6 +170,7 @@ router.delete('/:id', requireAuth, async (req, res) => {
     logger.info('EVENT_DELETE', { userId: req.user.id, username: req.user.username, eventId: Number(req.params.id) });
     res.status(204).end();
   } catch (err) {
+    logger.error('EVENT_DELETE_ERROR', { message: err.message });
     res.status(500).json({ error: 'Chyba.' });
   }
 });
