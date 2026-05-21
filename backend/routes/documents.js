@@ -10,6 +10,7 @@ const { query } = require('../db');
 const { requireAuth, requireEditor, requireAdmin } = require('../middleware/auth');
 const { extractText } = require('../services/textExtract');
 const { getStatus, reconnectNow, indexDocument } = require('../services/meili');
+const logger  = require('../utils/logger');
 
 const router = express.Router();
 
@@ -219,7 +220,7 @@ router.get('/tree', requireAuth, async (req, res) => {
 
     res.json(roots);
   } catch (err) {
-    console.error('[Documents Tree Error]', err.message);
+    logger.error('DOCUMENTS_TREE_ERROR', { message: err.message });
     res.status(500).json({ error: 'Nepodarilo sa načítať dokumenty. Skúste prosím neskôr.' });
   }
 });
@@ -237,7 +238,7 @@ router.get('/folders/:id/files', requireAuth, async (req, res) => {
     `, [req.params.id]);
     res.json(rows);
   } catch (err) {
-    console.error('[Get Files Error]', err.message);
+    logger.error('DOCUMENTS_FILES_ERROR', { message: err.message });
     res.status(500).json({ error: 'Nepodarilo sa načítať súbory. Skúste prosím neskôr.' });
   }
 });
@@ -260,9 +261,10 @@ router.post('/folders', requireAuth, async (req, res) => {
       INSERT INTO doc_folders (name, parent_id, description, sort_order, created_by)
       VALUES ($1, $2, $3, $4, $5) RETURNING *
     `, [name.trim(), parent_id || null, description || null, sort_order || 0, req.user.id]);
+    logger.info('FOLDER_CREATE', { userId: req.user.id, username: req.user.username, folderId: rows[0].id, name: rows[0].name, parentId: rows[0].parent_id });
     res.status(201).json(rows[0]);
   } catch (err) {
-    console.error('[Create Folder Error]', err.message);
+    logger.error('FOLDER_CREATE_ERROR', { message: err.message });
     res.status(500).json({ error: 'Nepodarilo sa vytvoriť priečinok. Skúste prosím neskôr.' });
   }
 });
@@ -276,9 +278,10 @@ router.patch('/folders/:id', requireAuth, requireEditor, async (req, res) => {
       WHERE id=$3 RETURNING *
     `, [name, description || null, req.params.id]);
     if (!rows[0]) return res.status(404).json({ error: 'Priečinok neexistuje.' });
+    logger.info('FOLDER_UPDATE', { userId: req.user.id, username: req.user.username, folderId: Number(req.params.id), name: rows[0].name });
     res.json(rows[0]);
   } catch (err) {
-    console.error('[Update Folder Error]', err.message);
+    logger.error('FOLDER_UPDATE_ERROR', { message: err.message });
     res.status(500).json({ error: 'Nepodarilo sa upraviť priečinok. Skúste prosím neskôr.' });
   }
 });
@@ -298,9 +301,10 @@ router.delete('/folders/:id', requireAuth, requireEditor, async (req, res) => {
       const fp = urlToUploadPath(f.file_url);
       if (fp) fs.unlink(fp, () => {});
     }
+    logger.info('FOLDER_DELETE', { userId: req.user.id, username: req.user.username, folderId: Number(req.params.id), filesDeleted: files.length });
     res.status(204).end();
   } catch (err) {
-    console.error('[Delete Folder Error]', err.message);
+    logger.error('FOLDER_DELETE_ERROR', { message: err.message });
     res.status(500).json({ error: 'Nepodarilo sa vymazať priečinok. Skúste prosím neskôr.' });
   }
 });
@@ -313,7 +317,7 @@ router.post('/folders/:id/upload', requireAuth,
       if (!allowed) return;
       next();
     } catch (err) {
-      console.error('[Upload Access Check Error]', err.message);
+      logger.error('FILE_UPLOAD_ACCESS_ERROR', { message: err.message });
       res.status(500).json({ error: 'Pri nahrávaní súboru došlo k chybe. Skúste neskôr.' });
     }
   },
@@ -326,7 +330,7 @@ router.post('/folders/:id/upload', requireAuth,
         if (err.message?.includes('Nepodporovaný')) {
           return res.status(400).json({ error: 'Nepodporovaný formát súboru.' });
         }
-        console.error('[Upload Multer Error]', err.message);
+        logger.error('FILE_UPLOAD_MULTER_ERROR', { message: err.message });
         return res.status(500).json({ error: 'Pri nahrávaní súboru došlo k chybe. Skúste neskôr.' });
       }
       next();
@@ -387,6 +391,7 @@ router.post('/folders/:id/upload', requireAuth,
         if (oldPath && oldPath !== req.file.path) {
           fs.unlink(oldPath, () => {});
         }
+        logger.info('FILE_OVERWRITE', { userId: req.user.id, username: req.user.username, fileId: rows[0].id, name: requestedName, folderId, size: req.file.size });
       } else {
         ({ rows } = await query(
           `INSERT INTO doc_files (folder_id, name, file_url, file_size, mime_type, uploaded_by)
@@ -400,6 +405,7 @@ router.post('/folders/:id/upload', requireAuth,
             req.user.id,
           ]
         ));
+        logger.info('FILE_UPLOAD', { userId: req.user.id, username: req.user.username, fileId: rows[0].id, name: requestedName, folderId, size: req.file.size });
       }
       res.status(201).json(rows[0]);
     } catch (err) {
@@ -410,7 +416,7 @@ router.post('/folders/:id/upload', requireAuth,
           error: 'Súbor s rovnakým názvom už v priečinku existuje.',
         });
       }
-      console.error('[Upload DB Error]', err.message);
+      logger.error('FILE_UPLOAD_DB_ERROR', { message: err.message });
       res.status(500).json({ error: 'Pri nahrávaní súboru došlo k chybe. Skúste neskôr.' });
     }
   }
@@ -427,9 +433,10 @@ router.delete('/files/:id', requireAuth, requireEditor, async (req, res) => {
       const fp = urlToUploadPath(rows[0].file_url);
       if (fp) fs.unlink(fp, () => {});
     }
+    logger.info('FILE_DELETE', { userId: req.user.id, username: req.user.username, fileId: Number(req.params.id) });
     res.status(204).end();
   } catch (err) {
-    console.error('[Delete File Error]', err.message);
+    logger.error('FILE_DELETE_ERROR', { message: err.message });
     res.status(500).json({ error: 'Nepodarilo sa vymazať súbor. Skúste prosím neskôr.' });
   }
 });
@@ -452,7 +459,7 @@ router.post('/search/reconnect', requireAuth, async (_req, res) => {
         : 'Meilisearch je nedostupný. Backend skúsi opätovné pripojenie automaticky.',
     });
   } catch (err) {
-    console.error('[Documents Search Reconnect Error]', err.message);
+    logger.error('DOCUMENTS_RECONNECT_ERROR', { message: err.message });
     res.status(500).json({ error: 'Nepodarilo sa skúsiť opätovné pripojenie Meilisearch.' });
   }
 });
@@ -483,6 +490,7 @@ router.post('/reindex', requireAuth, requireAdmin, async (_req, res) => {
     `);
 
     // Odošleme odpoveď hneď a samotné indexovanie dobehne na pozadí.
+    logger.info('DOCUMENTS_REINDEX', { userId: _req.user?.id, username: _req.user?.username, total: rows.length });
     res.json({ ok: true, total: rows.length });
 
     setImmediate(async () => {
@@ -500,12 +508,12 @@ router.post('/reindex', requireAuth, requireAdmin, async (_req, res) => {
             fileUrl: row.file_url,
           });
         } catch (err) {
-          console.warn('[Documents Reindex Warning]', row.file_id, err.message);
+          logger.warn('DOCUMENTS_REINDEX_FILE_WARNING', { fileId: row.file_id, message: err.message });
         }
       }
     });
   } catch (err) {
-    console.error('[Documents Reindex Error]', err.message);
+    logger.error('DOCUMENTS_REINDEX_ERROR', { message: err.message });
     res.status(500).json({ error: 'Nepodarilo sa spustiť reindexovanie dokumentov.' });
   }
 });

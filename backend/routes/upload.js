@@ -7,6 +7,7 @@ const multer  = require('multer');
 const path    = require('path');
 const crypto  = require('crypto');
 const { requireAuth } = require('../middleware/auth');
+const logger  = require('../utils/logger');
 
 const router = express.Router();
 
@@ -34,6 +35,7 @@ const upload = multer({
 router.post('/image', requireAuth, upload.single('image'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Žiadny súbor nebol nahraný.' });
   const url = `/uploads/${req.file.filename}`;
+  logger.info('IMAGE_UPLOAD', { userId: req.user.id, username: req.user.username, filename: req.file.filename, size: req.file.size });
   res.status(201).json({ url });
 });
 
@@ -61,6 +63,8 @@ const uploadAny = multer({
 // POST /api/upload/file – ľubovoľný dokument (50 MB)
 router.post('/file', requireAuth, uploadAny.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Žiadny súbor nebol nahraný.' });
+  
+  logger.info('FILE_UPLOAD_TEMP', { userId: req.user.id, username: req.user.username, filename: req.file.filename, originalName: req.file.originalname, size: req.file.size });
   res.status(201).json({
     url:       `/uploads/${req.file.filename}`,
     name:      req.file.originalname,
@@ -93,7 +97,7 @@ router.post('/cleanup', requireAuth, (req, res) => {
         deleted++;
       }
     } catch (err) {
-      console.warn('[File cleanup failed]', err.message);
+      logger.warn('FILE_CLEANUP_FAILED', { message: err.message });
       failed++;
     }
   }

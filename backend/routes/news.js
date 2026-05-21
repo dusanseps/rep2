@@ -7,6 +7,7 @@ const { query } = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const { notifyTeams } = require('../services/teams');
 const { isSafeUrl, normalizeTextInput } = require('../utils/security');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -58,7 +59,7 @@ function broadcastNewsUpdate(type, newsItem) {
     try {
       res.write(`data: ${data}\n\n`);
     } catch (err) {
-      console.warn('[SSE broadcast failed]', err.message);
+      logger.warn('NEWS_SSE_BROADCAST_FAILED', { message: err.message });
       sseClients.delete(res);
     }
   });
@@ -104,14 +105,14 @@ router.get('/', requireAuth, async (req, res) => {
     );
     res.json(result.rows);
   } catch (err) {
-    console.error(err.message);
+    logger.error('NEWS_LIST_ERROR', { message: err.message });
     res.status(500).json({ error: 'Nepodarilo sa načítať novinky.' });
   }
 });
 
 // SSE /api/news/subscribe – Real-time updates (MUSÍ byť PRE /:id aby nebol matchnutý ako ID)
 router.get('/subscribe', requireAuth, (req, res) => {
-  console.log('[SSE] Client connected');
+  logger.http('NEWS_SSE_CONNECT', { userId: req.user.id, username: req.user.username });
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -126,14 +127,14 @@ router.get('/subscribe', requireAuth, (req, res) => {
     try {
       res.write(':\n\n');
     } catch (err) {
-      console.warn('[SSE keep-alive ping failed]', err.message);
+      logger.warn('NEWS_SSE_KEEPALIVE_FAILED', { message: err.message });
       clearInterval(keepAliveInterval);
       sseClients.delete(res);
     }
   }, 30000);
   
   req.on('close', () => {
-    console.log('[SSE] Client disconnected');
+    logger.http('NEWS_SSE_DISCONNECT', { userId: req.user.id, username: req.user.username });
     clearInterval(keepAliveInterval);
     sseClients.delete(res);
   });
@@ -163,7 +164,7 @@ router.get('/:id/comments', requireAuth, async (req, res) => {
 
     res.json(result.rows.map((r) => mapNewsCommentRow(r, req.user)));
   } catch (err) {
-    console.error('[News comments list] Error:', err.message);
+    logger.error('NEWS_COMMENTS_LIST_ERROR', { message: err.message });
     res.status(500).json({ error: 'Nepodarilo sa načítať komentáre.' });
   }
 });
@@ -223,8 +224,9 @@ router.post('/:id/comments', requireAuth, async (req, res) => {
       newsId: Number(req.params.id),
       commentId: responseData.id,
     });
+    logger.info('NEWS_COMMENT_CREATE', { userId: req.user.id, username: req.user.username, newsId: Number(req.params.id), commentId: responseData.id });
   } catch (err) {
-    console.error('[News comments create] Error:', err.message);
+    logger.error('NEWS_COMMENT_CREATE_ERROR', { message: err.message });
     res.status(500).json({ error: 'Nepodarilo sa uložiť komentár.' });
   }
 });
@@ -284,8 +286,9 @@ router.patch('/:id/comments/:commentId', requireAuth, async (req, res) => {
       newsId: Number(req.params.id),
       commentId: responseData.id,
     });
+    logger.info('NEWS_COMMENT_UPDATE', { userId: req.user.id, username: req.user.username, newsId: Number(req.params.id), commentId: responseData.id });
   } catch (err) {
-    console.error('[News comments update] Error:', err.message);
+    logger.error('NEWS_COMMENT_UPDATE_ERROR', { message: err.message });
     res.status(500).json({ error: 'Nepodarilo sa upraviť komentár.' });
   }
 });
@@ -321,9 +324,10 @@ router.delete('/:id/comments/:commentId', requireAuth, async (req, res) => {
       newsId: Number(req.params.id),
       commentId: Number(req.params.commentId),
     });
+    logger.info('NEWS_COMMENT_DELETE', { userId: req.user.id, username: req.user.username, newsId: Number(req.params.id), commentId: Number(req.params.commentId) });
     res.status(204).end();
   } catch (err) {
-    console.error('[News comments delete] Error:', err.message);
+    logger.error('NEWS_COMMENT_DELETE_ERROR', { message: err.message });
     res.status(500).json({ error: 'Nepodarilo sa zmazať komentár.' });
   }
 });
@@ -400,6 +404,7 @@ router.post('/', requireAuth, async (req, res) => {
     const responseData = withAttachments.rows[0];
     res.status(201).json(responseData);
     broadcastNewsUpdate('create', responseData);
+    logger.info('NEWS_CREATE', { userId: req.user.id, username: req.user.username, newsId: row.id, title: row.title, isPublished: row.is_published });
     // Notifikácia do Teams (fire-and-forget)
     if (row.is_published) {
       notifyTeams({
@@ -410,7 +415,7 @@ router.post('/', requireAuth, async (req, res) => {
       });
     }
   } catch (err) {
-    console.error(err.message);
+    logger.error('NEWS_CREATE_ERROR', { message: err.message });
     res.status(500).json({ error: 'Nepodarilo sa uložiť novinku.' });
   }
 });
@@ -475,8 +480,9 @@ router.patch('/:id', requireAuth, async (req, res) => {
     const responseData = withAttachments.rows[0];
     res.json(responseData);
     broadcastNewsUpdate('update', responseData);
+    logger.info('NEWS_UPDATE', { userId: req.user.id, username: req.user.username, newsId: Number(req.params.id), title: result.rows[0].title, isPublished: result.rows[0].is_published });
   } catch (err) {
-    console.error(err.message);
+    logger.error('NEWS_UPDATE_ERROR', { message: err.message });
     res.status(500).json({ error: 'Chyba.' });
   }
 });
@@ -493,9 +499,10 @@ router.delete('/:id', requireAuth, async (req, res) => {
 
     await query('DELETE FROM news WHERE id = $1', [req.params.id]);
     broadcastNewsUpdate('delete', { id: req.params.id });
+    logger.info('NEWS_DELETE', { userId: req.user.id, username: req.user.username, newsId: Number(req.params.id) });
     res.status(204).end();
   } catch (err) {
-    console.error(err.message);
+    logger.error('NEWS_DELETE_ERROR', { message: err.message });
     res.status(500).json({ error: 'Chyba pri mazaní.' });
   }
 });

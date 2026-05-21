@@ -6,6 +6,7 @@ const express = require('express');
 const { query } = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const { notifyTeams } = require('../services/teams');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -27,7 +28,7 @@ function broadcastEventsUpdate(type, eventItem) {
 }
 
 router.get('/subscribe', requireAuth, (req, res) => {
-  console.log('[Events SSE] Client connected');
+  logger.http('EVENTS_SSE_CONNECT', { userId: req.user.id, username: req.user.username });
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -46,7 +47,7 @@ router.get('/subscribe', requireAuth, (req, res) => {
   }, 30000);
 
   req.on('close', () => {
-    console.log('[Events SSE] Client disconnected');
+    logger.http('EVENTS_SSE_DISCONNECT', { userId: req.user.id, username: req.user.username });
     clearInterval(keepAliveInterval);
     sseClients.delete(res);
   });
@@ -66,7 +67,7 @@ router.get('/', requireAuth, async (req, res) => {
     `, [limit]);
     res.json(result.rows);
   } catch (err) {
-    console.error(err.message);
+    logger.error('EVENTS_LIST_ERROR', { message: err.message });
     res.status(500).json({ error: 'Nepodarilo sa načítať udalosti.' });
   }
 });
@@ -84,6 +85,7 @@ router.get('/all', requireAuth, async (req, res) => {
     `, [limit, offset]);
     res.json(result.rows);
   } catch (err) {
+    logger.error('EVENTS_ALL_ERROR', { message: err.message });
     res.status(500).json({ error: 'Chyba.' });
   }
 });
@@ -103,6 +105,7 @@ router.post('/', requireAuth, async (req, res) => {
     const created = result.rows[0];
     res.status(201).json(created);
     broadcastEventsUpdate('create', created);
+    logger.info('EVENT_CREATE', { userId: req.user.id, username: req.user.username, eventId: created.id, title: created.title });
     // Notifikácia do Teams (fire-and-forget)
     const row = created;
     const startStr = row.event_start
@@ -117,7 +120,7 @@ router.post('/', requireAuth, async (req, res) => {
       location:    row.location || '',
     });
   } catch (err) {
-    console.error(err.message);
+    logger.error('EVENT_CREATE_ERROR', { message: err.message });
     res.status(500).json({ error: 'Nepodarilo sa vytvoriť udalosť.' });
   }
 });
@@ -144,6 +147,7 @@ router.patch('/:id', requireAuth, async (req, res) => {
     const updated = result.rows[0];
     res.json(updated);
     broadcastEventsUpdate('update', updated);
+    logger.info('EVENT_UPDATE', { userId: req.user.id, username: req.user.username, eventId: updated.id, title: updated.title });
   } catch (err) {
     res.status(500).json({ error: 'Chyba.' });
   }
@@ -162,6 +166,7 @@ router.delete('/:id', requireAuth, async (req, res) => {
 
     await query('DELETE FROM events WHERE id = $1', [req.params.id]);
     broadcastEventsUpdate('delete', { id: req.params.id });
+    logger.info('EVENT_DELETE', { userId: req.user.id, username: req.user.username, eventId: Number(req.params.id) });
     res.status(204).end();
   } catch (err) {
     res.status(500).json({ error: 'Chyba.' });

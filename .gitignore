@@ -21,6 +21,9 @@ build/
 backend/public/uploads/*
 !backend/public/uploads/.gitkeep
 
+# Logs
+backend/logs/
+
 # Lock files (optional - keep package-lock.json)
 package-lock.json
 # pnpm-lock.yaml

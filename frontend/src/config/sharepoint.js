@@ -1,5 +1,5 @@
 /**
- * Navigačné položky ľavého sidebaru aplikácie REPRESENTATIVE.
+ * Navigačné položky sidebaru aplikácie.
  * Externe odkazy (na SharePoint) majú external: true.
  */
 export const NAV_ITEMS = [

@@ -5,11 +5,12 @@
  */
 
 require('dotenv').config({ path: require('path').join(__dirname, '.env') });
-const express    = require('express');
-const path       = require('path');
-const logger     = require('morgan');
-const cookieParser = require('cookie-parser');
-const helmet = require('helmet');
+const express         = require('express');
+const path            = require('path');
+const cookieParser    = require('cookie-parser');
+const helmet          = require('helmet');
+const expressWinston  = require('express-winston');
+const winstonLogger   = require('./utils/logger');
 
 const authRouter      = require('./routes/auth');
 const eventsRouter    = require('./routes/events');
@@ -22,7 +23,21 @@ const { requireAuth } = require('./middleware/auth');
 
 const app = express();
 
-app.use(logger('dev'));
+// HTTP request logging – pred routami (loguje metódu, URL, status, response time, user)
+app.use(expressWinston.logger({
+  winstonInstance: winstonLogger,
+  msg: '{{req.method}} {{req.url}} {{res.statusCode}} {{res.responseTime}}ms',
+  meta: true,
+  metaField: null,
+  requestWhitelist:  [],
+  responseWhitelist: [],
+  statusLevels: true,
+  ignoreRoute: (req) => req.path.startsWith('/uploads'),
+  dynamicMeta: (req) => (
+    req.user ? { userId: req.user.id, username: req.user.username } : {}
+  ),
+}));
+
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 
@@ -88,8 +103,19 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 /* ── Error handler ──────────────────────────────────────────── */
+// express-winston errorLogger musí byť PRED vlastným error handlerom
+app.use(expressWinston.errorLogger({
+  winstonInstance: winstonLogger,
+  meta: true,
+  metaField: null,
+  requestWhitelist: [],
+  dynamicMeta: (req) => (
+    req.user ? { userId: req.user.id, username: req.user.username } : {}
+  ),
+}));
+
 app.use((err, req, res, _next) => {
-  console.error(err.stack);
+  winstonLogger.error('Unhandled error', { message: err.message, stack: err.stack, url: req.url, method: req.method });
   res.status(err.status || 500).json({ error: err.message });
 });
 

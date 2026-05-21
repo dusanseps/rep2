@@ -6,6 +6,7 @@ const express = require('express');
 const { query } = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const { isSafeUrl } = require('../utils/security');
+const logger = require('../utils/logger');
 
 const router  = express.Router();
 const DAY_MS  = 24 * 60 * 60 * 1000;
@@ -27,7 +28,7 @@ function broadcastTickerUpdate(type, tickerItem) {
 
 // SSE /api/ticker/subscribe – Real-time updates
 router.get('/subscribe', requireAuth, (req, res) => {
-  console.log('[Ticker SSE] Client connected');
+  logger.http('TICKER_SSE_CONNECT', { userId: req.user.id, username: req.user.username });
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -47,7 +48,7 @@ router.get('/subscribe', requireAuth, (req, res) => {
   }, 30000);
   
   req.on('close', () => {
-    console.log('[Ticker SSE] Client disconnected');
+    logger.http('TICKER_SSE_DISCONNECT', { userId: req.user.id, username: req.user.username });
     clearInterval(keepAliveInterval);
     sseClients.delete(res);
   });
@@ -75,7 +76,7 @@ router.get('/', requireAuth, async (req, res) => {
     `);
     res.json(result.rows);
   } catch (err) {
-    console.error(err.message);
+    logger.error('TICKER_LIST_ERROR', { message: err.message });
     res.status(500).json({ error: 'Nepodarilo sa načítať ticker správy.' });
   }
 });
@@ -114,9 +115,10 @@ router.post('/', requireAuth, async (req, res) => {
     }
     const responseData = { ...result.rows[0], attachments: attachments || [] };
     broadcastTickerUpdate('create', responseData);
+    logger.info('TICKER_CREATE', { userId: req.user.id, username: req.user.username, tickerId: result.rows[0].id, text: text.trim().slice(0, 100) });
     res.status(201).json(responseData);
   } catch (err) {
-    console.error(err.message);
+    logger.error('TICKER_CREATE_ERROR', { message: err.message });
     res.status(500).json({ error: 'Nepodarilo sa uložiť správu.' });
   }
 });
@@ -168,9 +170,10 @@ router.patch('/:id', requireAuth, async (req, res) => {
     }
     const responseData = { ...result.rows[0], attachments: attachments || [] };
     broadcastTickerUpdate('update', responseData);
+    logger.info('TICKER_UPDATE', { userId: req.user.id, username: req.user.username, tickerId: Number(req.params.id) });
     res.json(responseData);
   } catch (err) {
-    console.error(err.message);
+    logger.error('TICKER_UPDATE_ERROR', { message: err.message });
     res.status(500).json({ error: 'Chyba.' });
   }
 });
@@ -187,9 +190,10 @@ router.delete('/:id', requireAuth, async (req, res) => {
 
     await query('DELETE FROM ticker_messages WHERE id = $1', [req.params.id]);
     broadcastTickerUpdate('delete', { id: req.params.id });
+    logger.info('TICKER_DELETE', { userId: req.user.id, username: req.user.username, tickerId: Number(req.params.id) });
     res.status(204).end();
   } catch (err) {
-    console.error(err.message);
+    logger.error('TICKER_DELETE_ERROR', { message: err.message });
     res.status(500).json({ error: 'Chyba pri mazaní.' });
   }
 });
@@ -203,6 +207,7 @@ router.delete('/purge', requireAuth, async (req, res) => {
         AND expires_at < NOW() - INTERVAL '${PURGE_DAYS} days'
     `);
     res.json({ deleted: result.rowCount });
+    logger.info('TICKER_PURGE', { userId: req.user.id, username: req.user.username, deleted: result.rowCount });
   } catch (err) {
     res.status(500).json({ error: 'Chyba.' });
   }

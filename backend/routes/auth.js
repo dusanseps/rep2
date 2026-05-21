@@ -16,6 +16,8 @@ const {
   broadcastPermissionUpdate,
 } = require('../services/permissionEvents');
 
+const logger = require('../utils/logger');
+
 const router = express.Router();
 
 function isTrueLike(value) {
@@ -82,6 +84,7 @@ router.post('/login', loginLimiter, async (req, res) => {
     const user = result.rows[0];
 
     if (!user || !(await bcrypt.compare(password, user.password_hash))) {
+      logger.warn('AUTH_LOGIN_FAILED', { username: username.trim().toLowerCase() });
       return res.status(401).json({ error: 'Nesprávne meno alebo heslo.' });
     }
 
@@ -116,6 +119,7 @@ router.post('/login', loginLimiter, async (req, res) => {
     );
 
     res.cookie('token', token, COOKIE_OPTS);
+    logger.info('AUTH_LOGIN', { userId: user.id, username: user.username, role: user.role });
     res.json({
       id: user.id,
       username: user.username,
@@ -124,14 +128,23 @@ router.post('/login', loginLimiter, async (req, res) => {
       readAccess: isTrueLike(user.read_access),
     });
   } catch (err) {
-    console.error('Login error:', err.message);
+    logger.error('AUTH_LOGIN_ERROR', { message: err.message });
     res.status(500).json({ error: 'Interná chyba servera.' });
   }
 });
 
 // POST /api/auth/logout
 router.post('/logout', (req, res) => {
+  const token = req.cookies?.token;
+  let loggedUsername = null;
+  if (token) {
+    try {
+      const decoded = jwt.verify(token, SECRET);
+      loggedUsername = decoded.username;
+    } catch (_) {}
+  }
   res.clearCookie('token');
+  logger.info('AUTH_LOGOUT', { username: loggedUsername });
   res.json({ ok: true });
 });
 
@@ -187,7 +200,7 @@ router.post('/users/search', requireAuth, requireAdmin, async (req, res) => {
     const items = await searchAdUsers(searchQuery);
     return res.json({ items });
   } catch (err) {
-    console.error('LDAP search error:', err.message);
+    logger.error('LDAP_SEARCH_ERROR', { message: err.message });
     const isConfig = err.message.includes('konfiguracia');
     return res.status(isConfig ? 500 : 502).json({ error: err.message });
   }
@@ -297,13 +310,22 @@ router.put('/users/:username/folder-permissions', requireAuth, requireAdmin, asy
       mustLogout,
     });
 
+    logger.info('USER_PERMISSIONS_UPDATE', {
+      userId: req.user.id,
+      username: req.user.username,
+      targetUsername: username,
+      targetUserId: userId,
+      readAccess,
+      assignmentsCount: selected.length,
+    });
+
     return res.json({ ok: true });
   } catch (err) {
     await client.query('ROLLBACK');
     if (String(err.message || '').includes('root folders')) {
       return res.status(400).json({ error: err.message });
     }
-    console.error('Save user-folder-permissions error:', err.message);
+    logger.error('USER_PERMISSIONS_UPDATE_ERROR', { message: err.message });
     return res.status(500).json({ error: 'Nepodarilo sa uložiť priradenia.' });
   } finally {
     client.release();
@@ -323,10 +345,17 @@ router.post('/users', requireAuth, requireAdmin, async (req, res) => {
        VALUES ($1, $2, $3, $4, $5) RETURNING id, username, email, display_name, role`,
       [username.trim().toLowerCase(), email || null, display_name, hash, role]
     );
+    logger.info('USER_CREATE', {
+      userId: req.user.id,
+      username: req.user.username,
+      newUserId: result.rows[0].id,
+      newUsername: result.rows[0].username,
+      role: result.rows[0].role,
+    });
     res.status(201).json(result.rows[0]);
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'Používateľ s týmto menom alebo emailom už existuje.' });
-    console.error(err.message);
+    logger.error('USER_CREATE_ERROR', { message: err.message });
     res.status(500).json({ error: 'Interná chyba.' });
   }
 });
@@ -344,12 +373,14 @@ router.patch('/users/:id/password', requireAuth, async (req, res) => {
   }
   const hash = await bcrypt.hash(password, 10);
   await query('UPDATE users SET password_hash = $1 WHERE id = $2', [hash, targetId]);
+  logger.info('USER_PASSWORD_CHANGE', { userId: req.user.id, username: req.user.username, targetUserId: targetId });
   res.json({ ok: true });
 });
 
 // DELETE /api/auth/users/:id – deaktivácia (soft delete – len admin)
 router.delete('/users/:id', requireAuth, requireAdmin, async (req, res) => {
   await query('UPDATE users SET is_active = false WHERE id = $1', [req.params.id]);
+  logger.info('USER_DEACTIVATE', { userId: req.user.id, username: req.user.username, targetUserId: Number(req.params.id) });
   res.json({ ok: true });
 });
 
