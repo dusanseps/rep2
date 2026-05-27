@@ -99,6 +99,35 @@ async function assertFolderAccess(req, res, folderId) {
   return true;
 }
 
+async function assertWriteAccess(req, res, folderId) {
+  if (isElevatedUser(req.user)) return true;
+
+  // Zistíme či je priečinok root
+  const { rows } = await query(
+    'SELECT parent_id FROM doc_folders WHERE id = $1',
+    [folderId]
+  );
+  if (!rows[0]) {
+    res.status(404).json({ error: 'Priečinok neexistuje.' });
+    return false;
+  }
+  
+  // User nemôže zapisovať do root priečinkov (parent_id IS NULL)
+  if (rows[0].parent_id === null) {
+    res.status(403).json({ error: 'V koreňovom priečinku nemáte oprávnenie na zápis.' });
+    return false;
+  }
+
+  // Skontrolujeme prístup
+  const hasAccess = await userHasFolderAccess(req.user.id, folderId);
+  if (!hasAccess) {
+    res.status(403).json({ error: 'Nemáte oprávnenie pre tento priečinok.' });
+    return false;
+  }
+
+  return true;
+}
+
 function slugifySegment(value) {
   return String(value || '')
     .normalize('NFD')
@@ -240,7 +269,9 @@ router.get('/tree', requireAuth, async (req, res) => {
       map[row.id] = {
         ...row,
         file_count: Number(row.file_count) || 0,
-        can_manage: isElevatedUser(req.user) ? true : manageableIds.has(Number(row.id)),
+        can_manage: isElevatedUser(req.user)
+          ? true
+          : (row.parent_id !== null && manageableIds.has(Number(row.id))),
         children: [],
       };
     }
@@ -287,7 +318,19 @@ router.post('/folders', requireAuth, async (req, res) => {
         return res.status(403).json({ error: 'Nemáte oprávnenie vytvárať root priečinky.' });
       }
 
-      const allowed = await assertFolderAccess(req, res, parent_id);
+      // Skontrolujeme, že parent_id nie je root folder
+      const { rows: parentRows } = await query(
+        'SELECT parent_id FROM doc_folders WHERE id = $1',
+        [parent_id]
+      );
+      if (!parentRows[0]) {
+        return res.status(404).json({ error: 'Nadradený priečinok neexistuje.' });
+      }
+      if (parentRows[0].parent_id === null) {
+        return res.status(403).json({ error: 'V koreňovom priečinku nemáte oprávnenie vytvárať podpriečinky.' });
+      }
+
+      const allowed = await assertWriteAccess(req, res, parent_id);
       if (!allowed) return;
     }
 
@@ -309,7 +352,7 @@ router.patch('/folders/:id', requireAuth, async (req, res) => {
   const { name, description } = req.body || {};
   if (!name?.trim()) return res.status(400).json({ error: 'Povinné pole: name.' });
   try {
-    const allowed = await assertFolderAccess(req, res, req.params.id);
+    const allowed = await assertWriteAccess(req, res, req.params.id);
     if (!allowed) return;
     const { rows } = await query(`
       UPDATE doc_folders SET name=$1, description=$2, updated_at=NOW()
@@ -326,13 +369,19 @@ router.patch('/folders/:id', requireAuth, async (req, res) => {
 });
 
 // ── DELETE /api/documents/folders/:id (kaskádovo zmaže podpriečinky + súbory)
+// Pozn: User nemôže mazať priečinky vôbec (requireEditor), admin/editor iba
 router.delete('/folders/:id', requireAuth, requireEditor, async (req, res) => {
   try {
-    // Collect all file URLs for cleanup
+    // Rekurzívne zbierame file_url z celého podstromu (ľubovoľná hĺbka)
     const { rows: files } = await query(
-      `SELECT f.file_url FROM doc_files f
-       JOIN doc_folders fold ON fold.id = f.folder_id
-       WHERE fold.id = $1 OR fold.parent_id = $1`,
+      `WITH RECURSIVE subtree AS (
+         SELECT id FROM doc_folders WHERE id = $1
+         UNION ALL
+         SELECT f.id FROM doc_folders f
+         JOIN subtree s ON f.parent_id = s.id
+       )
+       SELECT df.file_url FROM doc_files df
+       JOIN subtree s ON df.folder_id = s.id`,
       [req.params.id]
     );
     await query('DELETE FROM doc_folders WHERE id = $1', [req.params.id]);
@@ -353,7 +402,7 @@ router.delete('/folders/:id', requireAuth, requireEditor, async (req, res) => {
 router.post('/folders/:id/upload', requireAuth,
   async (req, res, next) => {
     try {
-      const allowed = await assertFolderAccess(req, res, req.params.id);
+      const allowed = await assertWriteAccess(req, res, req.params.id);
       if (!allowed) return;
       next();
     } catch (err) {
@@ -476,7 +525,7 @@ router.patch('/files/:id', requireAuth, async (req, res) => {
     if (!fileRows[0]) return res.status(404).json({ error: 'Súbor neexistuje.' });
 
     const folderId = fileRows[0].folder_id;
-    const allowed = await assertFolderAccess(req, res, folderId);
+    const allowed = await assertWriteAccess(req, res, folderId);
     if (!allowed) return;
 
     const { rows: conflict } = await query(
@@ -501,8 +550,18 @@ router.patch('/files/:id', requireAuth, async (req, res) => {
 });
 
 // ── DELETE /api/documents/files/:id ──────────────────────────────────────────
-router.delete('/files/:id', requireAuth, requireEditor, async (req, res) => {
+router.delete('/files/:id', requireAuth, async (req, res) => {
   try {
+    const { rows: fileRows } = await query(
+      'SELECT folder_id FROM doc_files WHERE id = $1',
+      [req.params.id]
+    );
+    if (!fileRows[0]) return res.status(404).json({ error: 'Súbor neexistuje.' });
+
+    const folderId = fileRows[0].folder_id;
+    const allowed = await assertWriteAccess(req, res, folderId);
+    if (!allowed) return;
+
     const { rows } = await query(
       'DELETE FROM doc_files WHERE id = $1 RETURNING file_url, folder_id',
       [req.params.id]
@@ -511,7 +570,7 @@ router.delete('/files/:id', requireAuth, requireEditor, async (req, res) => {
       const fp = urlToUploadPath(rows[0].file_url);
       if (fp) fs.unlink(fp, () => {});
     }
-    logger.info('FILE_DELETE', { userId: req.user.id, username: req.user.username, fileId: Number(req.params.id) });
+    logger.info('FILE_DELETE', { userId: req.user.id, username: req.user.username, fileId: Number(req.params.id), folderId });
     broadcastDocumentsUpdate('file_delete', { folderId: rows[0]?.folder_id, fileId: Number(req.params.id) });
     res.status(204).end();
   } catch (err) {

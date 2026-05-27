@@ -7,6 +7,7 @@ import { createContext, createResource, createSignal, For, onCleanup, onMount, S
 import { useUser } from '../context/user.jsx';
 import { showErrorToast, showSuccessToast } from '../components/ui/Toasts.jsx';
 import ConflictRenameDialog from '../components/shared/ConflictRenameDialog.jsx';
+import ConfirmDialog from '../components/shared/ConfirmDialog.jsx';
 import MobileMenu from '../components/shared/MobileMenu.jsx';
 import { uploadFileWithConflictHandler } from '../utils/uploadHelper.js';
 
@@ -59,6 +60,11 @@ const DocsCtx = createContext();
 
 // ── Rekurzívny uzol stromu ────────────────────────────────────────────────────
 
+function countAllFiles(node) {
+  const own = Number(node.file_count) || 0;
+  return own + (node.children || []).reduce((sum, c) => sum + countAllFiles(c), 0);
+}
+
 function FolderNode({ node, depth = 0, query }) {
   const { user, refetch, filesVersion } = useContext(DocsCtx);
   const canManageNode = () => {
@@ -79,6 +85,8 @@ function FolderNode({ node, depth = 0, query }) {
   const [renameValue, setRenameValue] = createSignal('');
   const [renamingFolder, setRenamingFolder] = createSignal(false);
   const [renameFolderValue, setRenameFolderValue] = createSignal('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = createSignal(false);
+  const [pendingDeleteFile, setPendingDeleteFile] = createSignal(null); // { id, name }
   
   // Conflict resolution dialog state
   const [showConflictDialog, setShowConflictDialog] = createSignal(false);
@@ -87,7 +95,7 @@ function FolderNode({ node, depth = 0, query }) {
   
   let nameInputRef, fileInputRef;
 
-  const label = () => node.name.replace(/_/g, '\u00a0');
+  const label = () => node.name;
 
   const matchesSelf = () => !query() || node.name.toLowerCase().includes(query().toLowerCase());
   const hasVisibleChild = () => {
@@ -148,7 +156,11 @@ function FolderNode({ node, depth = 0, query }) {
   }
 
   async function deleteFolder() {
-    if (!confirm(`Naozaj zmazať priečinok „${node.name}" aj so všetkým obsahom?`)) return;
+    setShowDeleteConfirm(true);
+  }
+
+  async function doDeleteFolder() {
+    setShowDeleteConfirm(false);
     try {
       const r = await fetch(`${API}/documents/folders/${node.id}`, {
         method: 'DELETE',
@@ -207,10 +219,16 @@ function FolderNode({ node, depth = 0, query }) {
     }
   }
 
-  async function deleteFile(fileId) {
-    if (!confirm('Naozaj zmazať súbor?')) return;
+  async function deleteFile(fileId, fileName) {
+    setPendingDeleteFile({ id: fileId, name: fileName });
+  }
+
+  async function doDeleteFile() {
+    const file = pendingDeleteFile();
+    setPendingDeleteFile(null);
+    if (!file) return;
     try {
-      const r = await fetch(`${API}/documents/files/${fileId}`, {
+      const r = await fetch(`${API}/documents/files/${file.id}`, {
         method: 'DELETE',
         credentials: 'include',
       });
@@ -391,9 +409,7 @@ function FolderNode({ node, depth = 0, query }) {
                         </Show>
                         <Show when={canManageNode()}>
                           <button class="docs-file__ren" title="Premenovať súbor" onClick={() => { setRenamingFileId(f.id); setRenameValue(f.name); }}>✏️</button>
-                        </Show>
-                        <Show when={canDeleteNode()}>
-                          <button class="docs-file__del" title="Zmazať súbor" onClick={() => deleteFile(f.id)}>🗑</button>
+                          <button class="docs-file__del" title="Zmazať súbor" onClick={() => deleteFile(f.id, f.name)}>🗑</button>
                         </Show>
                       </>}>
                         <input
@@ -432,6 +448,36 @@ function FolderNode({ node, depth = 0, query }) {
             </Show>
 
           </div>
+        </Show>
+
+        {/* Potvrdenie mazania súboru */}
+        <Show when={pendingDeleteFile()}>
+          <ConfirmDialog
+            message={`Naozaj chcete zmazať súbor „${pendingDeleteFile()?.name}"?`}
+            confirmLabel="Zmazať"
+            cancelLabel="Zrušiť"
+            onConfirm={doDeleteFile}
+            onCancel={() => setPendingDeleteFile(null)}
+          />
+        </Show>
+
+        {/* Potvrdenie mazania priečinka */}
+        <Show when={showDeleteConfirm()}>
+          {() => {
+            const totalFiles = countAllFiles(node);
+            const msg = totalFiles > 0
+              ? `V priečinku „${node.name}" sa nachádza ${totalFiles} ${totalFiles === 1 ? 'súbor' : totalFiles < 5 ? 'súbory' : 'súborov'} (vrátane podpriečinkov). Naozaj chcete priečinok zmazať aj s celým obsahom?`
+              : `Naozaj chcete zmazať priečinok „${node.name}"?`;
+            return (
+              <ConfirmDialog
+                message={msg}
+                confirmLabel="Zmazať"
+                cancelLabel="Zrušiť"
+                onConfirm={doDeleteFolder}
+                onCancel={() => setShowDeleteConfirm(false)}
+              />
+            );
+          }}
         </Show>
 
         {/* Conflict Resolution Dialog */}
