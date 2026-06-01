@@ -75,6 +75,7 @@ function mapTickerRow(r) {
   return {
     id: String(r.id),
     text: r.text,
+    link: r.link_url || '',
     createdAt: Date.parse(r.created_at),
     expiresAt,
     expiresDays,
@@ -89,17 +90,17 @@ export async function fetchTickerMessages() {
   return rows.map(mapTickerRow);
 }
 
-export async function createTickerMessage({ text, expiresDays, attachments = [] }) {
+export async function createTickerMessage({ text, link, expiresDays, attachments = [] }) {
   await apiFetch('/ticker', {
     method: 'POST',
-    body: JSON.stringify({ text, expires_days: expiresDays || null, attachments }),
+    body: JSON.stringify({ text, link_url: link || null, expires_days: expiresDays || null, attachments }),
   });
 }
 
-export async function updateTickerMessage(id, { text, expiresDays, attachments = [] }) {
+export async function updateTickerMessage(id, { text, link, expiresDays, attachments = [] }) {
   await apiFetch(`/ticker/${id}`, {
     method: 'PATCH',
-    body: JSON.stringify({ text, expires_days: expiresDays || null, attachments }),
+    body: JSON.stringify({ text, link_url: link || null, expires_days: expiresDays || null, attachments }),
   });
 }
 

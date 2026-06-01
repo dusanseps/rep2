@@ -31,10 +31,27 @@ function activeMessages(list) {
   return list.filter((m) => !m.expiresAt || m.expiresAt > t);
 }
 
+function toSafeHref(rawHref) {
+  const href = String(rawHref || "").trim();
+  if (!href) return "";
+  if (href.startsWith("/")) return href.startsWith("//") ? "" : href;
+  try {
+    const url = new URL(href);
+    if (url.protocol === "http:" || url.protocol === "https:") return href;
+  } catch (_err) {
+    return "";
+  }
+  return "";
+}
+
 function buildLoopHTML(list) {
   const items = list
     .map((m) => {
       const text = esc(m.text || "");
+      const href = toSafeHref(m.link);
+      if (href) {
+        return `<span class="item"><a href="${esc(href)}" target="_blank" rel="noopener noreferrer"><strong>${text}</strong></a></span>`;
+      }
       return `<span class="item"><strong>${text}</strong></span>`;
     })
     .join("");
