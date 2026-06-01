@@ -15,6 +15,20 @@ const { query } = require('../db');
 const UPLOAD_DIR = path.join(__dirname, '..', 'public', 'uploads');
 const ORPHAN_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour - files older than this with no entity are orphaned
 
+async function listFilesRecursive(dir, baseDir = dir) {
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    const abs = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...await listFilesRecursive(abs, baseDir));
+    } else {
+      files.push(path.relative(baseDir, abs).split(path.sep).join('/'));
+    }
+  }
+  return files;
+}
+
 /**
  * Find and remove orphaned files on disk
  * Files are considered orphan if they are not referenced in any attachment table
@@ -24,14 +38,14 @@ async function cleanupOrphanedFilesOnDisk() {
     console.log(`[Cleanup] Starting orphan file cleanup...`);
     
     // Get list of all actual files on disk
-    const files = await fs.readdir(UPLOAD_DIR);
+    const files = await listFilesRecursive(UPLOAD_DIR);
     console.log(`[Cleanup] Found ${files.length} files on disk to check`);
     
     let deleted = 0;
     let errors = 0;
 
-    for (const filename of files) {
-      const filePath = path.join(UPLOAD_DIR, filename);
+    for (const relativePath of files) {
+      const filePath = path.join(UPLOAD_DIR, relativePath);
       
       try {
         const stats = await fs.stat(filePath);
@@ -42,7 +56,7 @@ async function cleanupOrphanedFilesOnDisk() {
         }
 
         // Check if file is referenced in any attachment table
-        const isReferenced = await checkIfFileIsReferenced(filename);
+        const isReferenced = await checkIfFileIsReferenced(relativePath);
         
         if (!isReferenced) {
           // File is orphaned - check age
@@ -51,12 +65,12 @@ async function cleanupOrphanedFilesOnDisk() {
           if (ageMs > ORPHAN_TIMEOUT_MS) {
             // Old enough to delete
             await fs.unlink(filePath);
-            console.log(`[Cleanup] Deleted orphaned file: ${filename} (age: ${Math.round(ageMs / 1000 / 60)} minutes)`);
+            console.log(`[Cleanup] Deleted orphaned file: ${relativePath} (age: ${Math.round(ageMs / 1000 / 60)} minutes)`);
             deleted++;
           }
         }
       } catch (err) {
-        console.warn(`[Cleanup] Error processing file ${filename}:`, err.message);
+        console.warn(`[Cleanup] Error processing file ${relativePath}:`, err.message);
         errors++;
       }
     }
@@ -72,8 +86,8 @@ async function cleanupOrphanedFilesOnDisk() {
 /**
  * Check if a file is referenced in any attachment table
  */
-async function checkIfFileIsReferenced(filename) {
-  const fileUrl = `/uploads/${filename}`;
+async function checkIfFileIsReferenced(relativePath) {
+  const fileUrl = `/uploads/${relativePath}`;
   
   try {
     // Check in ticker_attachments
@@ -99,7 +113,7 @@ async function checkIfFileIsReferenced(filename) {
 
     // Check if it's a news cover image
     const imageCheck = await query(
-      'SELECT id FROM news WHERE image_url = $1 LIMIT 1',
+      'SELECT id FROM news WHERE banner_image_url = $1 LIMIT 1',
       [fileUrl]
     );
     if (imageCheck.rows.length > 0) return true;
@@ -123,7 +137,7 @@ async function cleanupDeletedEntityFiles() {
 
     // Get orphaned ticker files (ticker message deleted but attachment record may remain)
     const { rows: orphanedTickerFiles } = await query(`
-      SELECT ta.file_url 
+      SELECT ta.file_url, ta.id
       FROM ticker_attachments ta
       LEFT JOIN ticker_messages tm ON tm.id = ta.ticker_id
       WHERE tm.id IS NULL
@@ -131,7 +145,7 @@ async function cleanupDeletedEntityFiles() {
     `);
 
     for (const row of orphanedTickerFiles) {
-      await deleteFileAndRecord(row.file_url, 'ticker_attachments');
+      await deleteFileAndRecord(row.file_url, 'ticker_attachments', row.id);
       deleted++;
     }
 

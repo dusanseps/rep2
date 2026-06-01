@@ -57,17 +57,19 @@ router.get('/', requireAuth, async (req, res) => {
     // ── Dopĺňanie file_urls z DB ──────────────────────────────────────────────
     let fileUrls = {};
     if (docHits.length > 0) {
-      const docIds = docHits.map((h) => h.fileId);
-      console.log('[Search] docHits count:', docHits.length, 'docIds:', docIds);
+      const docIds = docHits
+        .map((h) => Number(h.fileId))
+        .filter((id) => Number.isInteger(id) && id > 0);
+      if (docIds.length === 0) {
+        return res.json([]);
+      }
       const urlRows = await db.query(
         `SELECT id, file_url FROM doc_files WHERE id = ANY($1)`,
         [docIds]
       );
-      console.log('[Search] urlRows count:', urlRows.rows.length, 'rows:', urlRows.rows);
       fileUrls = Object.fromEntries(
         urlRows.rows.map((r) => [r.id, r.file_url])
       );
-      console.log('[Search] fileUrls map:', fileUrls);
     }
 
     // ── Kombinovanie výsledkov ────────────────────────────────────────────────
@@ -102,7 +104,7 @@ router.get('/', requireAuth, async (req, res) => {
 
     res.json(results);
   } catch (error) {
-    console.error('Search error:', error);
+    console.error('Search error:', error.message);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

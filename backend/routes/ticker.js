@@ -4,8 +4,9 @@
 
 const express = require('express');
 const { query } = require('../db');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requireAdmin } = require('../middleware/auth');
 const { isSafeUrl } = require('../utils/security');
+const { isSameOriginRequest } = require('../utils/security');
 const logger = require('../utils/logger');
 
 const router  = express.Router();
@@ -28,6 +29,9 @@ function broadcastTickerUpdate(type, tickerItem) {
 
 // SSE /api/ticker/subscribe – Real-time updates
 router.get('/subscribe', requireAuth, (req, res) => {
+  if (!isSameOriginRequest(req)) {
+    return res.status(403).json({ error: 'Zamietnutý cross-origin request.' });
+  }
   logger.http('TICKER_SSE_CONNECT', { userId: req.user.id, username: req.user.username });
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -54,9 +58,17 @@ router.get('/subscribe', requireAuth, (req, res) => {
   });
 });
 
+// GET /api/ticker/sse/stats - diagnostika SSE (admin)
+router.get('/sse/stats', requireAuth, requireAdmin, (_req, res) => {
+  res.json({ clients: sseClients.size, channel: 'ticker' });
+});
+
 // GET /api/ticker – všetky správy (aktívne aj expirované)
 router.get('/', requireAuth, async (req, res) => {
   try {
+    const includeExpired = String(req.query?.include_expired || '').toLowerCase() === 'true';
+    const isElevated = req.user.role === 'admin' || req.user.role === 'editor';
+
     const result = await query(`
       SELECT t.id, t.text, t.link_url, t.expires_at, t.expires_days,
              t.created_at, t.updated_at,
@@ -71,9 +83,11 @@ router.get('/', requireAuth, async (req, res) => {
              ) AS attachments
       FROM ticker_messages t
       LEFT JOIN users u ON u.id = t.created_by
+      WHERE ($1::boolean = true AND $2::boolean = true)
+         OR (t.expires_at IS NULL OR t.expires_at > NOW())
       ORDER BY t.created_at DESC
       LIMIT 200
-    `);
+    `, [includeExpired, isElevated]);
     res.json(result.rows);
   } catch (err) {
     logger.error('TICKER_LIST_ERROR', { message: err.message });

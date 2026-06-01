@@ -84,9 +84,7 @@ function mapTickerRow(r) {
 }
 
 export async function fetchTickerMessages() {
-  console.log('[sp] fetchTickerMessages start');
   const rows = await apiFetch('/ticker');
-  console.log('[sp] fetchTickerMessages rows', { isArray: Array.isArray(rows), len: Array.isArray(rows) ? rows.length : null, rows });
   if (!Array.isArray(rows)) return [];
   return rows.map(mapTickerRow);
 }

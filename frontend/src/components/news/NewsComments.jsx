@@ -1,5 +1,6 @@
 import { createEffect, createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
 import { showErrorToast, showSuccessToast } from '../ui/Toasts.jsx';
+import ConfirmDialog from '../shared/ConfirmDialog.jsx';
 import {
   fetchNewsComments,
   createNewsComment,
@@ -39,6 +40,7 @@ export default function NewsComments(props) {
   const [editDraft, setEditDraft] = createSignal('');
   const [sortOrder, setSortOrder] = createSignal('newest');
   const [page, setPage] = createSignal(1);
+  const [pendingDeleteCommentId, setPendingDeleteCommentId] = createSignal(null);
 
   const [comments, { refetch }] = createResource(
     () => (props.newsId ? String(props.newsId) : null),
@@ -186,7 +188,13 @@ export default function NewsComments(props) {
   }
 
   async function removeComment(commentId) {
-    if (!window.confirm('Naozaj chcete zmazať tento komentár?')) return;
+    setPendingDeleteCommentId(commentId);
+  }
+
+  async function doRemoveComment() {
+    const commentId = pendingDeleteCommentId();
+    setPendingDeleteCommentId(null);
+    if (!commentId) return;
 
     setSubmitting(true);
     try {
@@ -285,6 +293,16 @@ export default function NewsComments(props) {
   );
 
   return (
+    <>
+    <Show when={pendingDeleteCommentId()}>
+      <ConfirmDialog
+        message="Naozaj chcete zmazať tento komentár?"
+        confirmLabel="Zmazať"
+        cancelLabel="Zrušiť"
+        onConfirm={doRemoveComment}
+        onCancel={() => setPendingDeleteCommentId(null)}
+      />
+    </Show>
     <section style={{ 'margin-top': '24px', border: '1px solid #e2e8f0', 'border-radius': '10px', padding: '14px', background: '#f8fafc' }}>
       <div style={{ display: 'flex', 'justify-content': 'space-between', 'align-items': 'center', 'margin-bottom': '10px' }}>
         <h3 style={{ margin: 0, 'font-size': '16px' }}>Diskusia</h3>
@@ -380,5 +398,6 @@ export default function NewsComments(props) {
         </Show>
       </Show>
     </section>
+    </>
   );
 }

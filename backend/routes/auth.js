@@ -15,6 +15,7 @@ const {
   unregisterPermissionClient,
   broadcastPermissionUpdate,
 } = require('../services/permissionEvents');
+const { isSameOriginRequest } = require('../utils/security');
 
 const logger = require('../utils/logger');
 
@@ -155,6 +156,9 @@ router.get('/me', requireAuth, (req, res) => {
 
 // SSE /api/auth/permissions/subscribe - zmeny opravneni pre aktualneho usera
 router.get('/permissions/subscribe', requireAuth, (req, res) => {
+  if (!isSameOriginRequest(req)) {
+    return res.status(403).json({ error: 'Zamietnutý cross-origin request.' });
+  }
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');

@@ -273,7 +273,7 @@ export default function EventsPage() {
   return (
     <div class="rep-page">
       <div class="rep-page__header">
-        <h1 class="rep-page__title">Udalosti</h1>
+        <h1 class="rep-page__title">Kalendár</h1>
         <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
           <Show when={canCreate()}>
             <button class="rep-btn rep-btn--primary" onClick={() => setEditing({})}>

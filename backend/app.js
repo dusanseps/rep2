@@ -9,6 +9,7 @@ const express         = require('express');
 const path            = require('path');
 const cookieParser    = require('cookie-parser');
 const helmet          = require('helmet');
+const rateLimit       = require('express-rate-limit');
 const expressWinston  = require('express-winston');
 const winstonLogger   = require('./utils/logger');
 
@@ -19,6 +20,7 @@ const tickerRouter    = require('./routes/ticker');
 const uploadRouter    = require('./routes/upload');
 const documentsRouter = require('./routes/documents');
 const searchRouter = require('./routes/search');
+const systemRouter = require('./routes/system');
 const { requireAuth } = require('./middleware/auth');
 
 const app = express();
@@ -40,6 +42,16 @@ app.use(expressWinston.logger({
 
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
+
+// Základný API limiter proti burst/DoS (interné prostredie, preto vyšší limit).
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 1200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Príliš veľa požiadaviek. Skúste znova o chvíľu.' },
+});
+app.use('/api', apiLimiter);
 
 app.use(helmet({
   contentSecurityPolicy: {
@@ -89,6 +101,7 @@ app.use('/api/ticker',    tickerRouter);
 app.use('/api/upload',    uploadRouter);
 app.use('/api/documents', documentsRouter);
 app.use('/api/search', searchRouter);
+app.use('/api/system', systemRouter);
 
 /* ── Statické uploads – chránené autentifikáciou ───────────── */
 app.use('/uploads', requireAuth, express.static(path.join(__dirname, 'public', 'uploads')));

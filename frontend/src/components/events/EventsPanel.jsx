@@ -88,7 +88,7 @@ export default function EventsPanel(props) {
   return (
     <section class="rep-panel">
       <div class="rep-panel__header">
-        <h2 class="rep-panel__title">Udalosti</h2>
+        <h2 class="rep-panel__title">Kalendár</h2>
         <A href="/udalosti" class="rep-panel__showall">Zobraziť všetko →</A>
       </div>
 

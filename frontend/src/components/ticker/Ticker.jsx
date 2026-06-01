@@ -56,20 +56,10 @@ export default function Ticker() {
   createEffect(() => {
     const params = new URLSearchParams(location.search);
     const tickerId = params.get("editTicker");
-    console.log("[Ticker] createEffect - location.search:", {
-      search: location.search,
-      tickerId,
-    });
 
     if (tickerId) {
       const id = Number(tickerId);
-      console.log("[Ticker] Parsed tickerId:", {
-        tickerId,
-        id,
-        isFinite: Number.isFinite(id),
-      });
       if (Number.isFinite(id) && id > 0) {
-        console.log("[Ticker] Setting editTickerId and opening modal:", { id });
         setEditTickerId(id);
         setModalOpen(true);
       }

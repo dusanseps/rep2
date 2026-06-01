@@ -7,7 +7,9 @@
     "search:up": "sh ../scripts/start-meilisearch.sh",
     "dev": "npm run search:up && node ./bin/www",
     "db:schema": "psql -U ${DB_USER:-rep_test} -d ${DB_NAME:-representative} -f ./db/schema.sql",
-    "db:seed": "node ./db/seed.js"
+    "db:seed": "node ./db/seed.js",
+    "db:migrate": "node ./db/run-migrations.js",
+    "ops:disk-check": "node ./scripts/check-disk.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

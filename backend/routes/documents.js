@@ -6,10 +6,11 @@ const multer  = require('multer');
 const path    = require('path');
 const crypto  = require('crypto');
 const fs      = require('fs');
-const { query } = require('../db');
+const { query, pool } = require('../db');
 const { requireAuth, requireEditor, requireAdmin } = require('../middleware/auth');
 const { extractText } = require('../services/textExtract');
 const { getStatus, reconnectNow, indexDocument } = require('../services/meili');
+const { isSameOriginRequest } = require('../utils/security');
 const logger  = require('../utils/logger');
 
 const router = express.Router();
@@ -85,18 +86,6 @@ async function listManageableFolderIds(userId) {
   );
 
   return new Set(rows.map((r) => Number(r.id)));
-}
-
-async function assertFolderAccess(req, res, folderId) {
-  if (isElevatedUser(req.user)) return true;
-
-  const hasAccess = await userHasFolderAccess(req.user.id, folderId);
-  if (!hasAccess) {
-    res.status(403).json({ error: 'Nemáte oprávnenie pre tento priečinok.' });
-    return false;
-  }
-
-  return true;
 }
 
 async function assertWriteAccess(req, res, folderId) {
@@ -217,12 +206,23 @@ const uploadDoc = multer({
   limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
-    ALLOWED_EXT.includes(ext) ? cb(null, true) : cb(new Error('Nepodporovaný formát.'));
+    const blockedMime = [
+      'application/x-msdownload',
+      'application/x-sh',
+      'text/x-php',
+      'application/x-httpd-php',
+    ];
+    const mime = String(file.mimetype || '').toLowerCase();
+    const allowed = ALLOWED_EXT.includes(ext) && Boolean(mime) && !blockedMime.includes(mime);
+    allowed ? cb(null, true) : cb(new Error('Nepodporovaný formát.'));
   },
 });
 
 // ── GET /api/documents/subscribe – SSE real-time updates ──────────────────
 router.get('/subscribe', requireAuth, (req, res) => {
+  if (!isSameOriginRequest(req)) {
+    return res.status(403).json({ error: 'Zamietnutý cross-origin request.' });
+  }
   logger.http('DOCUMENTS_SSE_CONNECT', { userId: req.user.id, username: req.user.username });
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -239,6 +239,11 @@ router.get('/subscribe', requireAuth, (req, res) => {
     clearInterval(keepAliveInterval);
     sseClients.delete(res);
   });
+});
+
+// GET /api/documents/sse/stats - diagnostika SSE (admin)
+router.get('/sse/stats', requireAuth, requireAdmin, (_req, res) => {
+  res.json({ clients: sseClients.size, channel: 'documents' });
 });
 
 // ── GET /api/documents/tree – celý strom priečinkov ─────────────────────────
@@ -427,12 +432,32 @@ router.post('/folders/:id/upload', requireAuth,
   },
   async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'Súbor nebol vybraný.' });
+    const client = await pool.connect();
     try {
       const requestedName = normalizeRequestedFileName(req.body?.fileName, req.file.originalname);
       const overwrite = String(req.body?.overwrite || '').toLowerCase() === 'true';
       const folderId = Number(req.params.id);
 
-      const { rows: existingRows } = await query(
+      const quotaMb = Number(process.env.USER_DOC_QUOTA_MB || 0);
+      if (!isElevatedUser(req.user) && quotaMb > 0) {
+        const quotaBytes = Math.floor(quotaMb * 1024 * 1024);
+        const usage = await query(
+          `SELECT COALESCE(SUM(file_size), 0)::bigint AS used
+           FROM doc_files
+           WHERE uploaded_by = $1`,
+          [req.user.id]
+        );
+        const used = Number(usage.rows[0]?.used || 0);
+        if (used + Number(req.file.size || 0) > quotaBytes) {
+          removeUploadedTempFile(req.file.path);
+          return res.status(413).json({ error: `Prekročený osobný limit úložiska (${quotaMb} MB).` });
+        }
+      }
+
+      await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`doc:${folderId}:${requestedName.toLowerCase()}`]);
+
+      const { rows: existingRows } = await client.query(
         `SELECT id, name, file_url
          FROM doc_files
          WHERE folder_id = $1 AND LOWER(name) = LOWER($2)
@@ -443,6 +468,7 @@ router.post('/folders/:id/upload', requireAuth,
 
       const existing = existingRows[0];
       if (existing && !overwrite) {
+        await client.query('ROLLBACK');
         removeUploadedTempFile(req.file.path);
         return res.status(409).json({
           code: 'FILE_EXISTS',
@@ -456,9 +482,10 @@ router.post('/folders/:id/upload', requireAuth,
       const fileUrl = `/uploads/${relativePath}`;
 
       let rows;
+      let oldPathToDelete = null;
       if (existing && overwrite) {
-        const oldPath = urlToUploadPath(existing.file_url);
-        ({ rows } = await query(
+        oldPathToDelete = urlToUploadPath(existing.file_url);
+        ({ rows } = await client.query(
           `UPDATE doc_files
            SET name = $1,
                file_url = $2,
@@ -477,13 +504,21 @@ router.post('/folders/:id/upload', requireAuth,
             existing.id,
           ]
         ));
-        if (oldPath && oldPath !== req.file.path) {
-          fs.unlink(oldPath, () => {});
+
+        if (!rows[0]) {
+          await client.query('ROLLBACK');
+          removeUploadedTempFile(req.file.path);
+          return res.status(409).json({ error: 'Súbor bol medzitým zmenený iným používateľom. Skúste akciu zopakovať.' });
+        }
+
+        await client.query('COMMIT');
+        if (oldPathToDelete && oldPathToDelete !== req.file.path) {
+          fs.unlink(oldPathToDelete, () => {});
         }
         logger.info('FILE_OVERWRITE', { userId: req.user.id, username: req.user.username, fileId: rows[0].id, name: requestedName, folderId, size: req.file.size });
         broadcastDocumentsUpdate('file_upload', { folderId, fileId: rows[0].id });
       } else {
-        ({ rows } = await query(
+        ({ rows } = await client.query(
           `INSERT INTO doc_files (folder_id, name, file_url, file_size, mime_type, uploaded_by)
            VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
           [
@@ -495,11 +530,13 @@ router.post('/folders/:id/upload', requireAuth,
             req.user.id,
           ]
         ));
+        await client.query('COMMIT');
         logger.info('FILE_UPLOAD', { userId: req.user.id, username: req.user.username, fileId: rows[0].id, name: requestedName, folderId, size: req.file.size });
         broadcastDocumentsUpdate('file_upload', { folderId, fileId: rows[0].id });
       }
       res.status(201).json(rows[0]);
     } catch (err) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
       removeUploadedTempFile(req.file?.path);
       if (err.code === '23505') {
         return res.status(409).json({
@@ -509,6 +546,8 @@ router.post('/folders/:id/upload', requireAuth,
       }
       logger.error('FILE_UPLOAD_DB_ERROR', { message: err.message });
       res.status(500).json({ error: 'Pri nahrávaní súboru došlo k chybe. Skúste neskôr.' });
+    } finally {
+      client.release();
     }
   }
 );
@@ -566,6 +605,7 @@ router.delete('/files/:id', requireAuth, async (req, res) => {
       'DELETE FROM doc_files WHERE id = $1 RETURNING file_url, folder_id',
       [req.params.id]
     );
+    if (!rows[0]) return res.status(404).json({ error: 'Súbor už bol vymazaný.' });
     if (rows[0]?.file_url) {
       const fp = urlToUploadPath(rows[0].file_url);
       if (fp) fs.unlink(fp, () => {});

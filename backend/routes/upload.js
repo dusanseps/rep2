@@ -7,6 +7,7 @@ const multer  = require('multer');
 const path    = require('path');
 const crypto  = require('crypto');
 const { requireAuth } = require('../middleware/auth');
+const { isSameOriginRequest, resolveSafeUploadPath } = require('../utils/security');
 const logger  = require('../utils/logger');
 
 const router = express.Router();
@@ -53,7 +54,16 @@ const uploadAny = multer({
   limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
-    if (ALLOWED_FILE_EXT.includes(ext) || ALLOWED_MIME.includes(file.mimetype)) {
+    const blockedMime = [
+      'application/x-msdownload',
+      'application/x-sh',
+      'text/x-php',
+      'application/x-httpd-php',
+    ];
+    const mime = String(file.mimetype || '').toLowerCase();
+    const extAllowed = ALLOWED_FILE_EXT.includes(ext);
+    const mimeAllowed = Boolean(mime) && !blockedMime.includes(mime);
+    if (extAllowed && mimeAllowed) {
       return cb(null, true);
     }
     cb(new Error('Nepodporovaný formát súboru.'));
@@ -74,29 +84,29 @@ router.post('/file', requireAuth, uploadAny.single('file'), (req, res) => {
 });
 
 // POST /api/upload/cleanup – vymazať súbory (keď sa formulár zruší)
-router.post('/cleanup', requireAuth, (req, res) => {
+router.post('/cleanup', requireAuth, async (req, res) => {
+  if (!isSameOriginRequest(req)) {
+    return res.status(403).json({ error: 'Zamietnutý cross-origin request.' });
+  }
+
   const { urls } = req.body || {};
   if (!Array.isArray(urls) || urls.length === 0) {
     return res.status(400).json({ error: 'Žiadne URLs na vymazanie.' });
   }
 
-  const fs = require('fs');
-  const path = require('path');
+  const fs = require('fs').promises;
+  const uploadRoot = path.join(__dirname, '..', 'public', 'uploads');
   let deleted = 0;
   let failed = 0;
 
-  for (const url of urls) {
+  for (const url of urls.slice(0, 200)) {
     try {
-      if (!url.startsWith('/uploads/')) continue;
-      const rel = decodeURIComponent(url.replace(/^\/uploads\//, ''));
-      const normalized = path.normalize(rel).replace(/^([.][.][\/\\])+/, '');
-      if (normalized.startsWith('..')) continue;
-      const filepath = path.join(__dirname, '..', 'public', 'uploads', normalized);
-      if (fs.existsSync(filepath)) {
-        fs.unlinkSync(filepath);
-        deleted++;
-      }
+      const filepath = resolveSafeUploadPath(uploadRoot, url);
+      if (!filepath) continue;
+      await fs.unlink(filepath);
+      deleted++;
     } catch (err) {
+      if (err.code === 'ENOENT') continue;
       logger.warn('FILE_CLEANUP_FAILED', { message: err.message });
       failed++;
     }

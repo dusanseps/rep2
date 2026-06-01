@@ -4,9 +4,9 @@
 
 const express = require('express');
 const { query } = require('../db');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requireAdmin } = require('../middleware/auth');
 const { notifyTeams } = require('../services/teams');
-const { isSafeUrl, normalizeTextInput } = require('../utils/security');
+const { isSafeUrl, normalizeTextInput, isSameOriginRequest } = require('../utils/security');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -112,6 +112,9 @@ router.get('/', requireAuth, async (req, res) => {
 
 // SSE /api/news/subscribe – Real-time updates (MUSÍ byť PRE /:id aby nebol matchnutý ako ID)
 router.get('/subscribe', requireAuth, (req, res) => {
+  if (!isSameOriginRequest(req)) {
+    return res.status(403).json({ error: 'Zamietnutý cross-origin request.' });
+  }
   logger.http('NEWS_SSE_CONNECT', { userId: req.user.id, username: req.user.username });
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -138,6 +141,11 @@ router.get('/subscribe', requireAuth, (req, res) => {
     clearInterval(keepAliveInterval);
     sseClients.delete(res);
   });
+});
+
+// GET /api/news/sse/stats - diagnostika SSE (admin)
+router.get('/sse/stats', requireAuth, requireAdmin, (_req, res) => {
+  res.json({ clients: sseClients.size, channel: 'news' });
 });
 
 // GET /api/news/:id/comments – diskusia pod novinkou

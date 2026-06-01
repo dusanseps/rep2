@@ -11,6 +11,7 @@ import {
   deleteTickerMessage,
 } from '../../services/sp.js';
 import ConflictRenameDialog from '../shared/ConflictRenameDialog.jsx';
+import ConfirmDialog from '../shared/ConfirmDialog.jsx';
 import { showErrorToast, showSuccessToast, showWarningToast } from '../ui/Toasts.jsx';
 import LoadingSpinner from '../shared/LoadingSpinner.jsx';
 import { shortBadgeText } from '../../utils/text.js';
@@ -96,6 +97,7 @@ export default function TickerModal(props) {
   const [docFolders, setDocFolders] = createSignal([]);
   const [docFolderId, setDocFolderId] = createSignal('');
   const [attachmentConflict, setAttachmentConflict] = createSignal(null);
+  const [pendingDeleteId, setPendingDeleteId] = createSignal(null);
   let sseSource = null;
   let textRef;
   let fileInputRef;
@@ -277,9 +279,13 @@ export default function TickerModal(props) {
     textRef?.focus();
   }
 
-  async function handleDelete(id) {
-    const m = msgs().find(x => x.id === id);
-    if (!window.confirm(`Naozaj chcete zmazať túto správu?\n\n"${m?.text || ''}"`)) return;
+  function handleDelete(id) {
+    setPendingDeleteId(id);
+  }
+
+  async function doDelete() {
+    const id = pendingDeleteId();
+    setPendingDeleteId(null);
     try {
       await deleteTickerMessage(id);
       await loadMessages();
@@ -661,10 +667,9 @@ export default function TickerModal(props) {
                       />
                       <span style={{ 'font-size': '13px', color: '#6b7280' }}>dni</span>
                       <div class="dt-chips">
-                        {[1, 3, 7, 14].map(d => (
+                        {[1, 3, 7].map(d => (
                           <button type="button" class="dt-chip" onClick={() => handleChip(d)}>{d}d</button>
                         ))}
-                        <button type="button" class="dt-chip" onClick={() => handleChip(0)}>∞</button>
                       </div>
                     </div>
                   </div>
@@ -752,6 +757,16 @@ export default function TickerModal(props) {
             </div>
           </div>
         </div>
+
+        <Show when={pendingDeleteId()}>
+          <ConfirmDialog
+            message={`Naozaj chcete zmazať túto správu?\n\n"${msgs().find(x => x.id === pendingDeleteId())?.text || ''}"`}
+            confirmLabel="Zmazať"
+            cancelLabel="Zrušiť"
+            onConfirm={doDelete}
+            onCancel={() => setPendingDeleteId(null)}
+          />
+        </Show>
 
         <Show when={attachmentConflict()}>
           <ConflictRenameDialog
