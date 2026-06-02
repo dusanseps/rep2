@@ -1142,6 +1142,7 @@ select.rep-form-select:focus {
   display: flex;
   align-items: flex-start;
   gap: 16px;
+  flex-wrap: wrap;
   background: #fff;
   border-radius: 12px;
   padding: 16px 24px;
@@ -1164,7 +1165,7 @@ select.rep-form-select:focus {
 .ev-page-item__loc  { font-size: 13px; color: #0072c6; }
 .ev-page-item__desc { font-size: 13px; color: #64748b; margin: 4px 0 0; line-height: 1.4; }
 
-.ev-page-item__actions { display: flex; gap: 8px; flex-shrink: 0; align-self: center; }
+.ev-page-item__actions { display: flex; gap: 8px; flex-shrink: 0; align-self: center; margin-left: auto; }
 
 /* ── Dokumenty – folder tree ──────────────────────────────────── */
 .docs-toolbar {
@@ -1193,6 +1194,7 @@ select.rep-form-select:focus {
   color: #1e293b;
   transition: background .1s;
   user-select: none;
+  flex-wrap: wrap;
 }
 .docs-node__row--haschildren { cursor: pointer; }
 .docs-node__row--haschildren:hover { background: #eff6ff; }
@@ -1356,6 +1358,7 @@ select.rep-form-select:focus {
   border: 1px solid #e2e8f0;
   font-size: 13px;
   transition: background .1s;
+  flex-wrap: wrap;
 }
 .docs-file:hover { background: #f1f5f9; }
 .docs-file__icon { font-size: 15px; flex-shrink: 0; }
