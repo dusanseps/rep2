@@ -63,12 +63,9 @@ router.get('/sse/stats', requireAuth, requireAdmin, (_req, res) => {
   res.json({ clients: sseClients.size, channel: 'ticker' });
 });
 
-// GET /api/ticker – všetky správy (aktívne aj expirované)
+// GET /api/ticker – aktívne + nedávno expirované (max 14 dní) pre všetkých užívateľov
 router.get('/', requireAuth, async (req, res) => {
   try {
-    const includeExpired = String(req.query?.include_expired || '').toLowerCase() === 'true';
-    const isElevated = req.user.role === 'admin' || req.user.role === 'editor';
-
     const result = await query(`
       SELECT t.id, t.text, t.link_url, t.expires_at, t.expires_days,
              t.created_at, t.updated_at,
@@ -83,11 +80,12 @@ router.get('/', requireAuth, async (req, res) => {
              ) AS attachments
       FROM ticker_messages t
       LEFT JOIN users u ON u.id = t.created_by
-      WHERE ($1::boolean = true AND $2::boolean = true)
-         OR (t.expires_at IS NULL OR t.expires_at > NOW())
+      WHERE t.expires_at IS NULL
+         OR t.expires_at > NOW()
+         OR t.expires_at > NOW() - INTERVAL '14 days'
       ORDER BY t.created_at DESC
       LIMIT 200
-    `, [includeExpired, isElevated]);
+    `);
     res.json(result.rows);
   } catch (err) {
     logger.error('TICKER_LIST_ERROR', { message: err.message });

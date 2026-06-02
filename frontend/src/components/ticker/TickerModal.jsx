@@ -83,6 +83,7 @@ export default function TickerModal(props) {
   const [msgs, setMsgs] = createSignal([]);
   const [loading, setLoading] = createSignal(false);
   const [search, setSearch] = createSignal('');
+  const [badgeFilter, setBadgeFilter] = createSignal(null); // null | 'active' | 'expired'
 
   const [editId, setEditId] = createSignal('');
   const [fText, setFText] = createSignal('');
@@ -264,15 +265,13 @@ export default function TickerModal(props) {
     setFAttachments(m.attachments || []);
     // Track original attachments for cleanup detection
     originalAttachments = [...(m.attachments || [])];
-    if (m.expiresDays && m.expiresDays > 0) {
+    if (m.expiresDays && m.expiresDays > 0 && (!m.expiresAt || m.expiresAt > Date.now())) {
       setFDays(String(m.expiresDays));
-    } else if (m.expiresAt) {
-      const leftDays = m.expiresAt > Date.now()
-        ? Math.max(1, Math.round((m.expiresAt - Date.now()) / DAY))
-        : 1;
+    } else if (m.expiresAt && m.expiresAt > Date.now()) {
+      const leftDays = Math.max(1, Math.round((m.expiresAt - Date.now()) / DAY));
       setFDays(String(leftDays));
     } else {
-      setFDays('');
+      setFDays('3');
     }
     setErrText('');
     setErrLink('');
@@ -324,7 +323,7 @@ export default function TickerModal(props) {
 
     try {
       if (editId()) {
-        await updateTickerMessage(editId(), { text, link, expiresAt, expiresDays, attachments: fAttachments() });
+        await updateTickerMessage(editId(), { text, link, expiresDays, attachments: fAttachments() });
       } else {
         await createTickerMessage({ text, link, expiresDays, attachments: fAttachments() });
       }
@@ -334,6 +333,33 @@ export default function TickerModal(props) {
     } catch (err) {
       console.error(err);
       showToast(`Chyba ukladania: ${err.message || err}`, 'err');
+    }
+  }
+
+  async function handleActivate() {
+    const daysRaw = fDays().trim();
+    if (!daysRaw || !/^\d+$/.test(daysRaw) || parseInt(daysRaw, 10) <= 0) {
+      setErrText('Zadajte počet dní pre aktiváciu.');
+      return;
+    }
+
+    const text = fText().trim();
+    const link = safeUrl(fLink());
+
+    try {
+      const days = parseInt(daysRaw, 10);
+      await updateTickerMessage(editId(), {
+        text,
+        link,
+        expiresDays: days,
+        attachments: fAttachments()
+      });
+      resetForm();
+      await loadMessages();
+      showToast('Správa aktivovaná', 'ok');
+    } catch (err) {
+      console.error(err);
+      showToast(`Chyba aktivácie: ${err.message || err}`, 'err');
     }
   }
 
@@ -511,13 +537,34 @@ export default function TickerModal(props) {
     setFDays(days === 0 ? '' : String(days));
   }
 
+  function toggleBadgeFilter(type) {
+    if (badgeFilter() === type) {
+      setBadgeFilter(null);
+      showToast('Filter zrušený – zobrazujú sa všetky správy', 'ok');
+    } else {
+      setBadgeFilter(type);
+      if (type === 'active') {
+        showToast('Zobrazuje len aktívne správy, opätovným kliknutím zrušíte filter', 'ok');
+      } else {
+        showToast('Zobrazuje len expirované správy, opätovným kliknutím zrušíte filter', 'ok');
+      }
+    }
+  }
+
   // Filtered list
   const filteredMsgs = () => {
     const q = search().toLowerCase().trim();
+    const t = Date.now();
     return msgs()
       .slice()
       .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-      .filter(m => !q || (m.text || '').toLowerCase().includes(q) || (m.author || '').toLowerCase().includes(q));
+      .filter(m => {
+        if (q && !(m.text || '').toLowerCase().includes(q) && !(m.author || '').toLowerCase().includes(q)) return false;
+        const alive = !m.expiresAt || m.expiresAt > t;
+        if (badgeFilter() === 'active' && !alive) return false;
+        if (badgeFilter() === 'expired' && alive) return false;
+        return true;
+      });
   };
 
   // Preview
@@ -592,7 +639,11 @@ export default function TickerModal(props) {
                               </span>
                             </div>
                             <div class="dt-badges">
-                              <span class={`badge ${alive ? 'ok' : 'dead'}`}>
+                              <span
+                                class={`badge ${alive ? 'ok' : 'dead'} badge-clickable`}
+                                onClick={() => toggleBadgeFilter(alive ? 'active' : 'expired')}
+                                title={alive ? 'Kliknutím zobraziť len aktívne' : 'Kliknutím zobraziť len expirované'}
+                              >
                                 {alive ? 'Aktívna' : 'Expirovaná'}
                               </span>
                               {alive && m.expiresAt &&
@@ -635,7 +686,7 @@ export default function TickerModal(props) {
               </div>
 
               {/* Formulár */}
-              <div class="dt-panel">
+              <div class="dt-panel dt-panel-form">
                 <form class="dt-form" onSubmit={handleSubmit} autocomplete="off">
                   {/* Text */}
                   <div class="dt-row">
@@ -749,6 +800,9 @@ export default function TickerModal(props) {
                   </Show>
 
                   <div class="dt-form-actions">
+                    <Show when={editId() && msgs().find(x => x.id === editId())?.expiresAt && msgs().find(x => x.id === editId()).expiresAt <= Date.now()}>
+                      <button type="button" class="dt-btn dt-primary" onClick={handleActivate}>Aktivovať</button>
+                    </Show>
                     <button type="submit" class="dt-btn dt-primary">Uložiť</button>
                     <button type="button" class="dt-btn" onClick={resetForm}>Vyčistiť</button>
                   </div>
