@@ -87,7 +87,8 @@ function FolderNode({ node, depth = 0, query }) {
   const [renameFolderValue, setRenameFolderValue] = createSignal('');
   const [showDeleteConfirm, setShowDeleteConfirm] = createSignal(false);
   const [pendingDeleteFile, setPendingDeleteFile] = createSignal(null); // { id, name }
-  
+  const [tickerUsageWarning, setTickerUsageWarning] = createSignal(null); // { type: 'file'|'folder', messages: [], onConfirm }
+
   // Conflict resolution dialog state
   const [showConflictDialog, setShowConflictDialog] = createSignal(false);
   const [conflictData, setConflictData] = createSignal(null);
@@ -161,6 +162,25 @@ function FolderNode({ node, depth = 0, query }) {
 
   async function doDeleteFolder() {
     setShowDeleteConfirm(false);
+
+    try {
+      const usageRes = await fetch(`${API}/documents/folders/${node.id}/ticker-usage`, { credentials: 'include' });
+      if (usageRes.ok) {
+        const tickerMsgs = await usageRes.json();
+        if (tickerMsgs.length > 0) {
+          setTickerUsageWarning({ messages: tickerMsgs, onConfirm: () => executeDeleteFolder() });
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('[Documents] Ticker usage check failed:', err.message);
+    }
+
+    await executeDeleteFolder();
+  }
+
+  async function executeDeleteFolder() {
+    setTickerUsageWarning(null);
     try {
       const r = await fetch(`${API}/documents/folders/${node.id}`, {
         method: 'DELETE',
@@ -227,8 +247,27 @@ function FolderNode({ node, depth = 0, query }) {
     const file = pendingDeleteFile();
     setPendingDeleteFile(null);
     if (!file) return;
+
     try {
-      const r = await fetch(`${API}/documents/files/${file.id}`, {
+      const usageRes = await fetch(`${API}/documents/files/${file.id}/ticker-usage`, { credentials: 'include' });
+      if (usageRes.ok) {
+        const tickerMsgs = await usageRes.json();
+        if (tickerMsgs.length > 0) {
+          setTickerUsageWarning({ messages: tickerMsgs, onConfirm: () => executeDeleteFile(file.id) });
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('[Documents] Ticker usage check failed:', err.message);
+    }
+
+    await executeDeleteFile(file.id);
+  }
+
+  async function executeDeleteFile(fileId) {
+    setTickerUsageWarning(null);
+    try {
+      const r = await fetch(`${API}/documents/files/${fileId}`, {
         method: 'DELETE',
         credentials: 'include',
       });
@@ -503,6 +542,17 @@ function FolderNode({ node, depth = 0, query }) {
               const resolver = conflictResolver();
               if (resolver) resolver({ type: 'overwrite' });
             }}
+          />
+        </Show>
+
+        {/* Ticker usage warning */}
+        <Show when={tickerUsageWarning()}>
+          <ConfirmDialog
+            message={`Tento súbor/priečinok sa používa ako príloha v ${tickerUsageWarning().messages.length} ticker ${tickerUsageWarning().messages.length === 1 ? 'správe' : tickerUsageWarning().messages.length < 5 ? 'správach' : 'správach'}:\n\n${tickerUsageWarning().messages.map(m => `„${m.text}"`).join('\n')}\n\nAk súbor zmažete, tieto prílohy prestanú fungovať. Pokračovať?`}
+            confirmLabel="Zmazať aj tak"
+            cancelLabel="Zrušiť"
+            onConfirm={tickerUsageWarning().onConfirm}
+            onCancel={() => setTickerUsageWarning(null)}
           />
         </Show>
       </div>

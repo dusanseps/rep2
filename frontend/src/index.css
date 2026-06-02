@@ -1056,6 +1056,7 @@ select.rep-form-select:focus {
   margin: 0 0 24px;
   text-align: center;
   line-height: 1.55;
+  white-space: pre-wrap;
 }
 
 .rep-confirm__actions {

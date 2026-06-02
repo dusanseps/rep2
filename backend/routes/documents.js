@@ -588,6 +588,46 @@ router.patch('/files/:id', requireAuth, async (req, res) => {
   }
 });
 
+// ── GET /api/documents/files/:id/ticker-usage ─────────────────────────────────
+router.get('/files/:id/ticker-usage', requireAuth, async (req, res) => {
+  try {
+    const { rows: fileRows } = await query('SELECT file_url FROM doc_files WHERE id = $1', [req.params.id]);
+    if (!fileRows[0]) return res.status(404).json({ error: 'Súbor neexistuje.' });
+    const { rows } = await query(
+      `SELECT DISTINCT tm.id, tm.text FROM ticker_attachments ta
+       JOIN ticker_messages tm ON tm.id = ta.ticker_id
+       WHERE ta.file_url = $1`,
+      [fileRows[0].file_url]
+    );
+    res.json(rows);
+  } catch (err) {
+    logger.error('FILE_TICKER_USAGE_ERROR', { message: err.message });
+    res.status(500).json({ error: 'Chyba pri kontrole referencií.' });
+  }
+});
+
+// ── GET /api/documents/folders/:id/ticker-usage ───────────────────────────────
+router.get('/folders/:id/ticker-usage', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await query(
+      `WITH RECURSIVE subtree AS (
+         SELECT id FROM doc_folders WHERE id = $1
+         UNION ALL
+         SELECT f.id FROM doc_folders f JOIN subtree s ON f.parent_id = s.id
+       )
+       SELECT DISTINCT tm.id, tm.text FROM ticker_attachments ta
+       JOIN ticker_messages tm ON tm.id = ta.ticker_id
+       JOIN doc_files df ON df.file_url = ta.file_url
+       JOIN subtree s ON df.folder_id = s.id`,
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch (err) {
+    logger.error('FOLDER_TICKER_USAGE_ERROR', { message: err.message });
+    res.status(500).json({ error: 'Chyba pri kontrole referencií.' });
+  }
+});
+
 // ── DELETE /api/documents/files/:id ──────────────────────────────────────────
 router.delete('/files/:id', requireAuth, async (req, res) => {
   try {
