@@ -7,8 +7,10 @@ import { fetchAllNews, fetchNewsById, createNews, updateNews, deleteNews } from 
 import { useUser } from '../context/user.jsx';
 import { useSearchParams, useNavigate } from '@solidjs/router';
 import ConfirmDialog from '../components/shared/ConfirmDialog.jsx';
+import ConflictRenameDialog from '../components/shared/ConflictRenameDialog.jsx';
 import MobileMenu from '../components/shared/MobileMenu.jsx';
 import { cleanupOrphanedFiles, getNewlyUploadedUrls, getNewlyUploadedImageUrls } from '../utils/uploadCleanup.js';
+import { buildSuggestedName, normalizeFileName, validateFileName } from '../utils/fileNames.js';
 import NewsComments from '../components/news/NewsComments.jsx';
 
 const API = import.meta.env.VITE_API_BASE || '/api';
@@ -118,6 +120,8 @@ function NewsForm({ item, onSave, onClose }) {
   const [err, setErr] = createSignal('');
   const [uploading, setUploading] = createSignal(false);
   const [uploadingFiles, setUploadingFiles] = createSignal(false);
+  const [draggingFiles, setDraggingFiles] = createSignal(false);
+  const [attachmentConflict, setAttachmentConflict] = createSignal(null);
   const [imageUrl, setImageUrl] = createSignal(item.imageUrl || '');
   const [attachments, setAttachments] = createSignal(item.attachments || []);
   const [docFolders, setDocFolders] = createSignal([]);
@@ -125,6 +129,7 @@ function NewsForm({ item, onSave, onClose }) {
   const [originalImageUrl] = createSignal(item.imageUrl || '');
   const [originalAttachments] = createSignal(item.attachments || []);
   let formRef;
+  let fileInputRef;
 
   // Cleanup handler for form cancellation
   async function cleanupOnClose() {
@@ -175,28 +180,125 @@ function NewsForm({ item, onSave, onClose }) {
     }
     setUploadingFiles(true);
     setErr('');
-    try {
-      for (const file of files) {
-        const fd = new FormData();
-        fd.append('file', file);
-        const r = await fetch(`${API}/documents/folders/${selectedFolderId}/upload`, { 
-          method: 'POST', credentials: 'include', body: fd 
+
+    async function uploadSingleFile(file, { overwrite = false, fileName } = {}) {
+      const fd = new FormData();
+      fd.append('file', file);
+      if (overwrite) fd.append('overwrite', 'true');
+      if (fileName) fd.append('fileName', fileName);
+      const r = await fetch(`${API}/documents/folders/${selectedFolderId}/upload`, {
+        method: 'POST', credentials: 'include', body: fd,
+      });
+      const body = await r.json().catch(() => ({}));
+      if (r.status === 409) return { ok: false, conflict: true, body };
+      if (!r.ok) return { ok: false, conflict: false, body };
+      return { ok: true, body };
+    }
+
+    function askConflict({ fileName, suggestedName, current, total }) {
+      return new Promise((resolve) => {
+        setAttachmentConflict({
+          fileName, suggestedName, current, total,
+          onCancel: () => resolve({ action: 'cancel' }),
+          onOverwrite: () => resolve({ action: 'overwrite' }),
+          onRename: (nextName) => resolve({ action: 'rename', fileName: nextName }),
         });
-        if (!r.ok) {
-          const b = await r.json().catch(() => ({}));
-          throw new Error(b.error || `HTTP ${r.status}`);
+      });
+    }
+
+    try {
+      let uploaded = 0, overwritten = 0, skipped = 0, failed = 0;
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        let targetName = normalizeFileName(file.name);
+        const initialErr = validateFileName(targetName);
+        if (initialErr) {
+          setErr(initialErr);
+          failed++;
+          continue;
         }
-        const data = await r.json();
-        setAttachments((prev) => [...prev, {
-          name: data.name,
-          url: data.file_url,
-          size: data.file_size,
-          mime_type: data.mime_type,
-        }]);
+
+        let done = false;
+        while (!done) {
+          const result = await uploadSingleFile(file, { fileName: targetName });
+
+          if (result.ok) {
+            const data = result.body;
+            setAttachments(prev => [...prev, {
+              name: data.name,
+              url: data.file_url,
+              size: data.file_size,
+              mime_type: data.mime_type,
+            }]);
+            uploaded++;
+            done = true;
+            continue;
+          }
+
+          if (!result.conflict) {
+            failed++;
+            setErr(result.body?.error || `Nahrávanie zlyhalo: HTTP chyba`);
+            done = true;
+            continue;
+          }
+
+          const decision = await askConflict({
+            fileName: result.body?.existingName || targetName,
+            suggestedName: result.body?.suggestedName || buildSuggestedName(targetName),
+            current: i + 1,
+            total: files.length,
+          });
+          setAttachmentConflict(null);
+
+          if (decision.action === 'cancel') {
+            skipped++;
+            done = true;
+            continue;
+          }
+
+          if (decision.action === 'rename') {
+            targetName = normalizeFileName(decision.fileName);
+            const renameErr = validateFileName(targetName);
+            if (renameErr) {
+              setErr(renameErr);
+              skipped++;
+              done = true;
+            }
+            continue;
+          }
+
+          if (decision.action === 'overwrite') {
+            const overwriteResult = await uploadSingleFile(file, { fileName: targetName, overwrite: true });
+            if (overwriteResult.ok) {
+              const data = overwriteResult.body;
+              setAttachments(prev => [...prev, {
+                name: data.name,
+                url: data.file_url,
+                size: data.file_size,
+                mime_type: data.mime_type,
+              }]);
+              overwritten++;
+            } else {
+              failed++;
+              setErr(overwriteResult.body?.error || 'Nahradenie súboru zlyhalo');
+            }
+            done = true;
+          }
+        }
+      }
+
+      if (uploaded || overwritten) {
+        const parts = [];
+        if (uploaded) parts.push(`nahrané: ${uploaded}`);
+        if (overwritten) parts.push(`nahradené: ${overwritten}`);
+        if (skipped) parts.push(`zrušené: ${skipped}`);
+        setErr('');
       }
     } catch (e) {
       setErr(`Nahrávanie prílohy zlyhalo: ${e.message}`);
     } finally {
+      setAttachmentConflict(null);
       setUploadingFiles(false);
     }
   }
@@ -320,10 +422,20 @@ function NewsForm({ item, onSave, onClose }) {
                 </For>
               </div>
             </Show>
-            <label class="rep-upload-btn">
-              <input type="file" multiple style={{ display: 'none' }} onChange={e => uploadAttachmentFiles([...e.target.files])} disabled={uploadingFiles()} />
-              {uploadingFiles() ? '⏳ Nahrávam…' : '📎 Nahrať dokumenty'}
-            </label>
+            <div
+              class={`rep-dropzone${draggingFiles() ? ' rep-dropzone--over' : ''}`}
+              onDragOver={e => { e.preventDefault(); setDraggingFiles(true); }}
+              onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setDraggingFiles(false); }}
+              onDrop={e => { e.preventDefault(); setDraggingFiles(false); uploadAttachmentFiles([...e.dataTransfer.files]); }}
+              onClick={() => fileInputRef?.click()}
+            >
+              <input type="file" ref={fileInputRef} multiple style={{ display: 'none' }}
+                onChange={e => uploadAttachmentFiles([...e.target.files])} disabled={uploadingFiles()} />
+              {uploadingFiles()
+                ? <><span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>↑</span> Nahrávam…</>
+                : <><span>📎</span> Presunúť súbory sem alebo kliknúť pre výber</>
+              }
+            </div>
           </div>
 
           <div class="rep-form__row">
@@ -342,6 +454,23 @@ function NewsForm({ item, onSave, onClose }) {
             <div class="rep-login__error">{err()}</div>
           </Show>
         </form>
+
+        <Show when={attachmentConflict()}>
+          <ConflictRenameDialog
+            title={`Súbor už existuje (${attachmentConflict().current}/${attachmentConflict().total})`}
+            descriptionPrefix="V cieľovom priečinku už existuje súbor"
+            descriptionSuffix="Vyberte jednu možnosť: premenovať, zrušiť upload alebo prepísať existujúci súbor."
+            itemName={attachmentConflict().fileName}
+            suggestedName={attachmentConflict().suggestedName}
+            normalizeName={normalizeFileName}
+            validateName={validateFileName}
+            onRename={attachmentConflict().onRename}
+            onCancel={attachmentConflict().onCancel}
+            onOverwrite={attachmentConflict().onOverwrite}
+            cancelLabel="Zrušiť upload"
+            overwriteLabel="Prepísať súbor"
+          />
+        </Show>
       </div>
     </div>
   );

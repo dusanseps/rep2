@@ -797,6 +797,29 @@ body.with-ticker .rep-page__content {
   transition: background .15s, border-color .15s;
 }
 .rep-upload-btn:hover { background: #e0f2fe; border-color: #0072c6; color: #005ba1; }
+
+.rep-dropzone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1.4px dashed #94a3b8;
+  border-radius: 8px;
+  padding: 14px 16px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease, color .15s ease;
+}
+.rep-dropzone:hover,
+.rep-dropzone--over {
+  background: #e0f2fe;
+  border-color: #0284c7;
+  color: #0f172a;
+}
+
 .rep-btn--ghost { background: #f8fafc; color: #475569; border: 1px solid #dbe4ef; }
 .rep-btn--ghost:hover { background: #e2e8f0; }
 .rep-btn--sm { padding: 4px 12px; font-size: 13px; }
