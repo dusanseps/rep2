@@ -4,6 +4,7 @@
  */
 
 import { createSignal, createEffect, For, Show, onMount, onCleanup } from 'solid-js';
+import { useNavigate } from '@solidjs/router';
 import {
   fetchTickerMessages,
   createTickerMessage,
@@ -75,11 +76,16 @@ function flattenFolders(nodes, level = 0, out = [], showAll = true) {
   }
   return out;
 }
-
+// Extrahovať folder ID z URL prílohy (napr. /uploads/documents/123/file.pdf -> 123)
+function extractFolderIdFromUrl(url) {
+  const match = String(url || '').match(/\/uploads\/documents\/(\d+)\//);
+  return match ? match[1] : null;
+}
 
 export default function TickerModal(props) {
   /* props: open, onClose, onMessagesChange, user */
 
+  const navigate = useNavigate();
   const [msgs, setMsgs] = createSignal([]);
   const [loading, setLoading] = createSignal(false);
   const [search, setSearch] = createSignal('');
@@ -440,6 +446,7 @@ export default function TickerModal(props) {
               url: data.file_url,
               size: data.file_size,
               mime_type: data.mime_type,
+              folder_id: data.folder_id,
             }]);
             uploaded += 1;
             done = true;
@@ -489,6 +496,7 @@ export default function TickerModal(props) {
                 url: data.file_url,
                 size: data.file_size,
                 mime_type: data.mime_type,
+                folder_id: data.folder_id,
               }]);
               overwritten += 1;
             } else {
@@ -660,17 +668,27 @@ export default function TickerModal(props) {
                                 </a>
                               )}
                               <For each={m.attachments || []}>
-                                {(att) => (
-                                  <a
-                                    class="badge att"
-                                    href={toSafeHref(att.url)}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    title={att.name}
-                                  >
-                                    {shortBadgeText(att.name)}
-                                  </a>
-                                )}
+                                {(att) => {
+                                  const folderId = extractFolderIdFromUrl(att.url);
+                                  const handleAttachmentClick = (e) => {
+                                    e.preventDefault();
+                                    if (folderId) {
+                                      requestClose();
+                                      navigate(`/dokumenty?folder=${folderId}`);
+                                    }
+                                  };
+                                  return (
+                                    <button
+                                      class="badge att"
+                                      onClick={handleAttachmentClick}
+                                      type="button"
+                                      title={`Otvoriť: ${att.name}`}
+                                      style={{ cursor: folderId ? 'pointer' : 'default', 'text-decoration': 'none', border: 'none', background: 'none', padding: '0', 'font-size': 'inherit' }}
+                                    >
+                                      {shortBadgeText(att.name)}
+                                    </button>
+                                  );
+                                }}
                               </For>
                             </div>
                             <div class="dt-card-actions">

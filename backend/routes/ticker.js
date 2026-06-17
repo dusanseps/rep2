@@ -73,7 +73,7 @@ router.get('/', requireAuth, async (req, res) => {
              COALESCE(
                (SELECT json_agg(json_build_object(
                   'id', a.id, 'name', a.name, 'url', a.file_url,
-                  'size', a.file_size, 'mime_type', a.mime_type
+                  'size', a.file_size, 'mime_type', a.mime_type, 'folder_id', a.folder_id
                 ) ORDER BY a.id)
                 FROM ticker_attachments a WHERE a.ticker_id = t.id),
                '[]'::json
@@ -119,9 +119,9 @@ router.post('/', requireAuth, async (req, res) => {
           return res.status(400).json({ error: `Neplatná URL prílohy: ${att?.name || att?.url}` });
         }
         await query(
-          `INSERT INTO ticker_attachments (ticker_id, name, file_url, file_size, mime_type)
-           VALUES ($1, $2, $3, $4, $5)`,
-          [tickerId, att.name, att.url, att.size || null, att.mime_type || null]
+          `INSERT INTO ticker_attachments (ticker_id, name, file_url, file_size, mime_type, folder_id)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [tickerId, att.name, att.url, att.size || null, att.mime_type || null, att.folder_id || null]
         );
       }
     }
@@ -174,9 +174,9 @@ router.patch('/:id', requireAuth, async (req, res) => {
       await query('DELETE FROM ticker_attachments WHERE ticker_id = $1', [req.params.id]);
       for (const att of attachments) {
         await query(
-          `INSERT INTO ticker_attachments (ticker_id, name, file_url, file_size, mime_type)
-           VALUES ($1, $2, $3, $4, $5)`,
-          [req.params.id, att.name, att.url, att.size || null, att.mime_type || null]
+          `INSERT INTO ticker_attachments (ticker_id, name, file_url, file_size, mime_type, folder_id)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [req.params.id, att.name, att.url, att.size || null, att.mime_type || null, att.folder_id || null]
         );
       }
     }

@@ -49,13 +49,41 @@ function buildLoopHTML(list) {
     .map((m) => {
       const text = esc(m.text || "");
       const href = toSafeHref(m.link);
-      if (href) {
+      const isDocumentLink = String(m.link || '').includes('/uploads/documents/');
+      
+      // Ak je dokument link (nie externe URL) → span s onclick na dokumenty
+      if (isDocumentLink && !href.includes('https://') && !href.includes('http://')) {
+        // Vezmi folder_id z prvého attachmentu (backend ho teraz vracia)
+        let folderId = null;
+        if (Array.isArray(m.attachments) && m.attachments.length > 0) {
+          folderId = m.attachments[0].folder_id;
+        }
+        if (folderId) {
+          return `<span class="item" style="cursor: pointer;" onclick="window.tickerNavigate('${folderId}', event); return false;"><strong>${text}</strong></span>`;
+        }
+      }
+      
+      // Ak má externe link → <a> ako predtým
+      if (href && (href.includes('https://') || href.includes('http://'))) {
         return `<span class="item"><a href="${esc(href)}" target="_blank" rel="noopener noreferrer"><strong>${text}</strong></a></span>`;
       }
+      
+      // Ak nemá nič → normálny text
       return `<span class="item"><strong>${text}</strong></span>`;
     })
     .join("");
   return `<div class="loop">${items || '<span class="item"><strong>Aktuálne neevidujeme žiadne nové správy. Platnosť predchádzajúcich správ vypršala.</strong></span>'}</div>`;
+}
+
+// Extrahovať folder ID z URL dokumentu
+// Z /uploads/documents/FOLDER_ID/... alebo /uploads/documents/FOLDER_NAME/...
+// Ak je v DB file_url, musíme vrátiť folder_id. 
+// Skúsim parsovať z URL - backend by mal vrátiť folder_id v response!
+function extractFolderIdFromUrl(url) {
+  // Teraz vracia Backend len URL bez folder_id, takže to nevieme extrahovať!
+  // Musíme zmeniť backend aby vraciał folder_id
+  const match = String(url || '').match(/\/uploads\/documents\/(\w+)\//);
+  return match ? match[1] : null;
 }
 
 export default function Ticker() {
@@ -183,7 +211,7 @@ export default function Ticker() {
   function connectSSE() {
     const API = import.meta.env.VITE_API_BASE || "/api";
     try {
-      const eventSource = new EventSource(`${API}/ticker/subscribe`);
+      const eventSource = new EventSource(`${API}/ticker/subscribe`, { withCredentials: true });
       eventSource.addEventListener("message", (event) => {
         try {
           const { type, item } = JSON.parse(event.data);
@@ -215,6 +243,15 @@ export default function Ticker() {
   }
 
   onMount(async () => {
+    // Globálna funkcia na navigáciu z inline onclick
+    window.tickerNavigate = (folderId, event) => {
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      navigate(`/dokumenty?folder=${folderId}`);
+    };
+
     // Oneskorenie pri prvom renderi (SP layout môže byť ešte neviditeľný)
     function tryRender(attempt) {
       renderTrack();

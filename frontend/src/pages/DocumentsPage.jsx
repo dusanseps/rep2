@@ -3,7 +3,8 @@
  * Admin: plná správa priečinkov
  * User: nahrávanie súborov a vytváranie podpriečinkov v povolených vetvách
  */
-import { createContext, createResource, createSignal, For, onCleanup, onMount, Show, useContext } from 'solid-js';
+import { createContext, createEffect, createResource, createSignal, For, onCleanup, onMount, Show, useContext } from 'solid-js';
+import { useLocation } from '@solidjs/router';
 import { useUser } from '../context/user.jsx';
 import { showErrorToast, showSuccessToast } from '../components/ui/Toasts.jsx';
 import ConflictRenameDialog from '../components/shared/ConflictRenameDialog.jsx';
@@ -66,7 +67,7 @@ function countAllFiles(node) {
 }
 
 function FolderNode({ node, depth = 0, query }) {
-  const { user, refetch, filesVersion } = useContext(DocsCtx);
+  const { user, refetch, filesVersion, openFolderIds, consumeAutoOpenFolderId } = useContext(DocsCtx);
   const canManageNode = () => {
     const role = user()?.role;
     if (role === 'admin' || role === 'editor') return true;
@@ -75,8 +76,21 @@ function FolderNode({ node, depth = 0, query }) {
   };
   const canDeleteNode = () => user()?.role === 'admin' || user()?.role === 'editor';
 
-  const [open, setOpen]           = createSignal(depth === 0);
+  // Ak je folder ID v openFolderIds, začni s otvoreným
+  const initialOpen = depth === 0 || openFolderIds()?.has(String(node.id));
+  const [open, setOpen]           = createSignal(initialOpen);
   const [dragging, setDragging]   = createSignal(false);
+
+  // Keď sa zmenia openFolderIds, aktualizuj open state
+  createEffect(() => {
+    const shouldBeOpen = openFolderIds()?.has(String(node.id));
+    if (shouldBeOpen) {
+      consumeAutoOpenFolderId?.(String(node.id));
+    }
+    if (shouldBeOpen && !open()) {
+      setOpen(true);
+    }
+  });
   const [addingChild, setAddingChild] = createSignal(false);
   const [newName, setNewName]     = createSignal('');
   const [saving, setSaving]       = createSignal(false);
@@ -564,14 +578,34 @@ function FolderNode({ node, depth = 0, query }) {
 
 export default function DocumentsPage() {
   const user = useUser();
+  const location = useLocation();
   const [tree, { refetch }] = createResource(fetchTree);
   const [search, setSearch]       = createSignal('');
   const [addingRoot, setAddingRoot] = createSignal(false);
   const [rootName, setRootName]   = createSignal('');
   const [rootSaving, setRootSaving] = createSignal(false);
+  const [openFolderIds, setOpenFolderIds] = createSignal(new Set());
   let rootNameRef;
 
   const [filesVersion, setFilesVersion] = createSignal(0);
+
+  // Keď sa zmení query parameter, otvoriť príslušný priečinok
+  createEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const folderId = params.get('folder');
+    if (folderId) {
+      setOpenFolderIds(new Set([folderId]));
+    }
+  });
+
+  function consumeAutoOpenFolderId(folderId) {
+    setOpenFolderIds((prev) => {
+      if (!prev.has(folderId)) return prev;
+      const next = new Set(prev);
+      next.delete(folderId);
+      return next;
+    });
+  }
 
   onMount(() => {
     const es = new EventSource(`${API}/documents/subscribe`, { withCredentials: true });
@@ -625,7 +659,7 @@ export default function DocumentsPage() {
   }
 
   return (
-    <DocsCtx.Provider value={{ user, refetch, filesVersion }}>
+    <DocsCtx.Provider value={{ user, refetch, filesVersion, openFolderIds, consumeAutoOpenFolderId }}>
       <div class="rep-page">
         <div class="rep-page__header">
           <h1 class="rep-page__title">Dokumenty</h1>
