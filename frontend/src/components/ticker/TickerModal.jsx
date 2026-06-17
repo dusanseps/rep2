@@ -64,6 +64,23 @@ function toSafeHref(rawHref) {
   return '#';
 }
 
+function getAttachmentUrl(att) {
+  return toSafeHref(att?.url || att?.file_url || '');
+}
+
+function getAttachmentName(att) {
+  const direct = String(att?.name || '').trim();
+  if (direct) return direct;
+
+  const rawUrl = String(att?.url || att?.file_url || '').trim();
+  if (!rawUrl) return 'priloha';
+
+  const last = rawUrl.split('/').filter(Boolean).pop() || 'priloha';
+  const decoded = safeUrl(last);
+  // Odstráni bežný technický prefix uploadu: timestamp-hash-
+  return decoded.replace(/^\d{10,}-[a-f0-9]{16,}-/i, '');
+}
+
 function flattenFolders(nodes, level = 0, out = [], showAll = true) {
   for (const n of nodes || []) {
     if (showAll || n.can_manage) {
@@ -669,24 +686,20 @@ export default function TickerModal(props) {
                               )}
                               <For each={m.attachments || []}>
                                 {(att) => {
-                                  const folderId = extractFolderIdFromUrl(att.url);
-                                  const handleAttachmentClick = (e) => {
-                                    e.preventDefault();
-                                    if (folderId) {
-                                      requestClose();
-                                      navigate(`/dokumenty?folder=${folderId}`);
-                                    }
-                                  };
+                                  const attUrl = getAttachmentUrl(att);
+                                  const attName = getAttachmentName(att);
+                                  if (attUrl === '#') return null;
                                   return (
-                                    <button
+                                    <a
                                       class="badge att"
-                                      onClick={handleAttachmentClick}
-                                      type="button"
-                                      title={`Otvoriť: ${att.name}`}
-                                      style={{ cursor: folderId ? 'pointer' : 'default', 'text-decoration': 'none', border: 'none', background: 'none', padding: '0', 'font-size': 'inherit' }}
+                                      href={attUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      download={attName}
+                                      title={`Stiahnuť: ${attName}`}
                                     >
-                                      {shortBadgeText(att.name)}
-                                    </button>
+                                      {shortBadgeText(attName)}
+                                    </a>
                                   );
                                 }}
                               </For>

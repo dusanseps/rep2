@@ -4,7 +4,7 @@
  * User: nahrávanie súborov a vytváranie podpriečinkov v povolených vetvách
  */
 import { createContext, createEffect, createResource, createSignal, For, onCleanup, onMount, Show, useContext } from 'solid-js';
-import { useLocation } from '@solidjs/router';
+import { useLocation, useNavigate } from '@solidjs/router';
 import { useUser } from '../context/user.jsx';
 import { showErrorToast, showSuccessToast } from '../components/ui/Toasts.jsx';
 import ConflictRenameDialog from '../components/shared/ConflictRenameDialog.jsx';
@@ -14,6 +14,7 @@ import { uploadFileWithConflictHandler } from '../utils/uploadHelper.js';
 
 const API = import.meta.env.VITE_API_BASE || '/api';
 const DOC_UPLOAD_ACCEPT = '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.rar,.7z,.jpg,.jpeg,.png,.webp,.gif,.bmp,.svg,.tif,.tiff,.msg,.eml,.odt,.ods,.odp,.rtf,.xml,.json,.md';
+const DOCS_OPEN_FOLDERS_STORAGE_KEY = 'documents.openFolderIds';
 
 function toSafeHref(rawHref) {
   const href = String(rawHref || '').trim();
@@ -66,8 +67,24 @@ function countAllFiles(node) {
   return own + (node.children || []).reduce((sum, c) => sum + countAllFiles(c), 0);
 }
 
+function findPathToFolder(nodes, targetId) {
+  const wanted = String(targetId);
+
+  function dfs(list, path) {
+    for (const n of list || []) {
+      const nextPath = [...path, String(n.id)];
+      if (String(n.id) === wanted) return nextPath;
+      const childPath = dfs(n.children || [], nextPath);
+      if (childPath.length) return childPath;
+    }
+    return [];
+  }
+
+  return dfs(nodes || [], []);
+}
+
 function FolderNode({ node, depth = 0, query }) {
-  const { user, refetch, filesVersion, openFolderIds, consumeAutoOpenFolderId } = useContext(DocsCtx);
+  const { user, refetch, filesVersion, openFolderIds, autoOpenFolderIds, consumeAutoOpenFolderId, toggleFolderOpen } = useContext(DocsCtx);
   const canManageNode = () => {
     const role = user()?.role;
     if (role === 'admin' || role === 'editor') return true;
@@ -77,19 +94,37 @@ function FolderNode({ node, depth = 0, query }) {
   const canDeleteNode = () => user()?.role === 'admin' || user()?.role === 'editor';
 
   // Ak je folder ID v openFolderIds, začni s otvoreným
-  const initialOpen = depth === 0 || openFolderIds()?.has(String(node.id));
+  const initialOpen = openFolderIds()?.has(String(node.id)) || autoOpenFolderIds()?.has(String(node.id));
   const [open, setOpen]           = createSignal(initialOpen);
   const [dragging, setDragging]   = createSignal(false);
 
-  // Keď sa zmenia openFolderIds, aktualizuj open state
+  function setOpenAndPersist(next) {
+    setOpen((prev) => {
+      const nextVal = typeof next === 'function' ? next(prev) : next;
+      toggleFolderOpen?.(String(node.id), nextVal);
+      return nextVal;
+    });
+  }
+
+  // Synchronizácia lokálneho stavu s perzistentným zoznamom otvorených priečinkov
   createEffect(() => {
-    const shouldBeOpen = openFolderIds()?.has(String(node.id));
-    if (shouldBeOpen) {
-      consumeAutoOpenFolderId?.(String(node.id));
+    const nodeId = String(node.id);
+    const shouldBeOpen = openFolderIds()?.has(nodeId);
+    if (shouldBeOpen !== open()) {
+      setOpen(shouldBeOpen);
     }
-    if (shouldBeOpen && !open()) {
-      setOpen(true);
+  });
+
+  // Jednorazové otvorenie z query parametra (napr. navigácia z tickera)
+  createEffect(() => {
+    const nodeId = String(node.id);
+    const shouldAutoOpen = autoOpenFolderIds()?.has(nodeId);
+    if (!shouldAutoOpen) return;
+
+    if (!open()) {
+      setOpenAndPersist(true);
     }
+    consumeAutoOpenFolderId?.(nodeId);
   });
   const [addingChild, setAddingChild] = createSignal(false);
   const [newName, setNewName]     = createSignal('');
@@ -357,7 +392,7 @@ function FolderNode({ node, depth = 0, query }) {
         {/* ── Riadok priečinka ── */}
         <div
           class={`docs-node__row${(node.children?.length || open()) ? ' docs-node__row--haschildren' : ''}${dragging() ? ' docs-node__row--dragover' : ''}`}
-          onClick={() => setOpen(o => !o)}
+          onClick={() => setOpenAndPersist(o => !o)}
           onDragOver={e => { e.preventDefault(); if (canManageNode()) setDragging(true); }}
           onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setDragging(false); }}
           onDrop={e => {
@@ -400,7 +435,7 @@ function FolderNode({ node, depth = 0, query }) {
               <button
                 class="docs-action-btn docs-action-btn--add"
                 title="Pridať podpriečinok"
-                onClick={() => { setAddingChild(a => !a); setOpen(true); setTimeout(() => nameInputRef?.focus(), 50); }}
+                onClick={() => { setAddingChild(a => !a); setOpenAndPersist(true); setTimeout(() => nameInputRef?.focus(), 50); }}
               >+📁</button>
               <button
                 class="docs-action-btn"
@@ -579,12 +614,15 @@ function FolderNode({ node, depth = 0, query }) {
 export default function DocumentsPage() {
   const user = useUser();
   const location = useLocation();
+  const navigate = useNavigate();
   const [tree, { refetch }] = createResource(fetchTree);
   const [search, setSearch]       = createSignal('');
   const [addingRoot, setAddingRoot] = createSignal(false);
   const [rootName, setRootName]   = createSignal('');
   const [rootSaving, setRootSaving] = createSignal(false);
   const [openFolderIds, setOpenFolderIds] = createSignal(new Set());
+  const [autoOpenFolderIds, setAutoOpenFolderIds] = createSignal(new Set());
+  const [persistReady, setPersistReady] = createSignal(false);
   let rootNameRef;
 
   const [filesVersion, setFilesVersion] = createSignal(0);
@@ -593,13 +631,47 @@ export default function DocumentsPage() {
   createEffect(() => {
     const params = new URLSearchParams(location.search);
     const folderId = params.get('folder');
-    if (folderId) {
-      setOpenFolderIds(new Set([folderId]));
+    if (!folderId) {
+      setAutoOpenFolderIds(new Set());
+      return;
+    }
+
+    const treeNodes = tree();
+    if (!Array.isArray(treeNodes) || treeNodes.length === 0) {
+      setAutoOpenFolderIds(new Set([String(folderId)]));
+      return;
+    }
+
+    const pathIds = findPathToFolder(treeNodes, folderId);
+    setAutoOpenFolderIds(new Set(pathIds.length ? pathIds : [String(folderId)]));
+  });
+
+  createEffect(() => {
+    if (!persistReady()) return;
+    try {
+      sessionStorage.setItem(
+        DOCS_OPEN_FOLDERS_STORAGE_KEY,
+        JSON.stringify(Array.from(openFolderIds()))
+      );
+    } catch (_err) {
+      // Ignorujeme chyby storage (napr. privacy mode)
     }
   });
 
-  function consumeAutoOpenFolderId(folderId) {
+  function toggleFolderOpen(folderId, shouldOpen) {
     setOpenFolderIds((prev) => {
+      const next = new Set(prev);
+      if (shouldOpen) {
+        next.add(folderId);
+      } else {
+        next.delete(folderId);
+      }
+      return next;
+    });
+  }
+
+  function consumeAutoOpenFolderId(folderId) {
+    setAutoOpenFolderIds((prev) => {
       if (!prev.has(folderId)) return prev;
       const next = new Set(prev);
       next.delete(folderId);
@@ -608,6 +680,20 @@ export default function DocumentsPage() {
   }
 
   onMount(() => {
+    try {
+      const raw = sessionStorage.getItem(DOCS_OPEN_FOLDERS_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          setOpenFolderIds(new Set(parsed.map((id) => String(id))));
+        }
+      }
+    } catch (_err) {
+      // Ignorujeme chyby storage
+    } finally {
+      setPersistReady(true);
+    }
+
     const es = new EventSource(`${API}/documents/subscribe`, { withCredentials: true });
     es.onmessage = (e) => {
       try {
@@ -658,8 +744,14 @@ export default function DocumentsPage() {
     }
   }
 
+  function closeAllFolders() {
+    setOpenFolderIds(new Set());
+    setAutoOpenFolderIds(new Set());
+    navigate(location.pathname, { replace: true });
+  }
+
   return (
-    <DocsCtx.Provider value={{ user, refetch, filesVersion, openFolderIds, consumeAutoOpenFolderId }}>
+    <DocsCtx.Provider value={{ user, refetch, filesVersion, openFolderIds, autoOpenFolderIds, consumeAutoOpenFolderId, toggleFolderOpen }}>
       <div class="rep-page">
         <div class="rep-page__header">
           <h1 class="rep-page__title">Dokumenty</h1>
@@ -684,6 +776,12 @@ export default function DocumentsPage() {
                 onClick={() => { setAddingRoot(a => !a); setTimeout(() => rootNameRef?.focus(), 50); }}
               >+ Priečinok</button>
             </Show>
+            <button
+              class="docs-add-root-btn"
+              type="button"
+              onClick={closeAllFolders}
+              title="Zatvoriť všetky otvorené priečinky"
+            >Zatvoriť všetko</button>
           </div>
 
           {/* Inline formulár pre koreňový priečinok */}
