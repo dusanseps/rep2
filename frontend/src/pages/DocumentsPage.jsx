@@ -621,7 +621,7 @@ export default function DocumentsPage() {
     onCleanup(() => es.close());
   });
 
-  const canManageRoots = () => user()?.role === 'admin' || user()?.role === 'editor';
+  const canManageRoots = () => user()?.role === 'admin';
 
   const totalFolders = () => {
     function count(ns) { return ns.reduce((s, n) => s + 1 + count(n.children || []), 0); }

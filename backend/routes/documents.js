@@ -101,13 +101,7 @@ async function assertWriteAccess(req, res, folderId) {
     return false;
   }
   
-  // User nemôže zapisovať do root priečinkov (parent_id IS NULL)
-  if (rows[0].parent_id === null) {
-    res.status(403).json({ error: 'V koreňovom priečinku nemáte oprávnenie na zápis.' });
-    return false;
-  }
-
-  // Skontrolujeme prístup
+  // Skontrolujeme prístup (platí aj pre root priečinky)
   const hasAccess = await userHasFolderAccess(req.user.id, folderId);
   if (!hasAccess) {
     res.status(403).json({ error: 'Nemáte oprávnenie pre tento priečinok.' });
@@ -276,7 +270,7 @@ router.get('/tree', requireAuth, async (req, res) => {
         file_count: Number(row.file_count) || 0,
         can_manage: isElevatedUser(req.user)
           ? true
-          : (row.parent_id !== null && manageableIds.has(Number(row.id))),
+          : manageableIds.has(Number(row.id)),
         children: [],
       };
     }
@@ -318,12 +312,13 @@ router.post('/folders', requireAuth, async (req, res) => {
   const { name, parent_id, description, sort_order } = req.body || {};
   if (!name?.trim()) return res.status(400).json({ error: 'Povinné pole: name.' });
   try {
-    if (!isElevatedUser(req.user)) {
-      if (!parent_id) {
-        return res.status(403).json({ error: 'Nemáte oprávnenie vytvárať root priečinky.' });
+    // Koreňový priečinok môže vytvoriť iba admin
+    if (!parent_id) {
+      if (req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Iba administrátor môže vytvárať koreňové priečinky.' });
       }
-
-      // Skontrolujeme, že parent_id nie je root folder
+    } else if (!isElevatedUser(req.user)) {
+      // Podpriečinok: skontroluj oprávnenie
       const { rows: parentRows } = await query(
         'SELECT parent_id FROM doc_folders WHERE id = $1',
         [parent_id]
@@ -332,11 +327,15 @@ router.post('/folders', requireAuth, async (req, res) => {
         return res.status(404).json({ error: 'Nadradený priečinok neexistuje.' });
       }
       if (parentRows[0].parent_id === null) {
-        return res.status(403).json({ error: 'V koreňovom priečinku nemáte oprávnenie vytvárať podpriečinky.' });
+        // Rodič je root priečinok – povolené ak má user priradenie k tomuto root priečinku
+        const hasAccess = await userHasFolderAccess(req.user.id, parent_id);
+        if (!hasAccess) {
+          return res.status(403).json({ error: 'Nemáte oprávnenie pre tento priečinok.' });
+        }
+      } else {
+        const allowed = await assertWriteAccess(req, res, parent_id);
+        if (!allowed) return;
       }
-
-      const allowed = await assertWriteAccess(req, res, parent_id);
-      if (!allowed) return;
     }
 
     const { rows } = await query(`
