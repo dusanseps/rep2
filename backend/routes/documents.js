@@ -375,9 +375,40 @@ router.patch('/folders/:id', requireAuth, async (req, res) => {
 // ── DELETE /api/documents/folders/:id (kaskádovo zmaže podpriečinky + súbory)
 // Pozn: User nemôže mazať priečinky vôbec (requireEditor), admin/editor iba
 router.delete('/folders/:id', requireAuth, requireEditor, async (req, res) => {
+  const folderId = Number(req.params.id);
+  if (!Number.isInteger(folderId) || folderId <= 0) {
+    return res.status(400).json({ error: 'Neplatny ID priecinka.' });
+  }
+
+  const client = await pool.connect();
   try {
+    await client.query('BEGIN');
+
+    const { rows: targetRows } = await client.query(
+      'SELECT id, parent_id FROM doc_folders WHERE id = $1',
+      [folderId]
+    );
+    const target = targetRows[0];
+    if (!target) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Priecinok neexistuje.' });
+    }
+
+    if (req.user.role !== 'admin') {
+      if (target.parent_id === null) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ error: 'Nemate opravnenie zmazat root priecinok.' });
+      }
+
+      const hasAccess = await userHasFolderAccess(req.user.id, folderId);
+      if (!hasAccess) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ error: 'Nemate opravnenie zmazat tento priecinok.' });
+      }
+    }
+
     // Rekurzívne zbierame file_url z celého podstromu (ľubovoľná hĺbka)
-    const { rows: files } = await query(
+    const { rows: files } = await client.query(
       `WITH RECURSIVE subtree AS (
          SELECT id FROM doc_folders WHERE id = $1
          UNION ALL
@@ -386,19 +417,40 @@ router.delete('/folders/:id', requireAuth, requireEditor, async (req, res) => {
        )
        SELECT df.file_url FROM doc_files df
        JOIN subtree s ON df.folder_id = s.id`,
-      [req.params.id]
+      [folderId]
     );
-    await query('DELETE FROM doc_folders WHERE id = $1', [req.params.id]);
+
+    const { rowCount } = await client.query(
+      'DELETE FROM doc_folders WHERE id = $1',
+      [folderId]
+    );
+    if (!rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Priecinok uz bol zmazany.' });
+    }
+
+    await client.query('COMMIT');
+
+    // Fyzické mazanie beží až po COMMITe databázy.
     for (const f of files) {
       const fp = urlToUploadPath(f.file_url);
       if (fp) fs.unlink(fp, () => {});
     }
-    logger.info('FOLDER_DELETE', { userId: req.user.id, username: req.user.username, folderId: Number(req.params.id), filesDeleted: files.length });
-    broadcastDocumentsUpdate('folder_delete', { folderId: Number(req.params.id) });
+
+    logger.info('FOLDER_DELETE', {
+      userId: req.user.id,
+      username: req.user.username,
+      folderId,
+      filesDeleted: files.length,
+    });
+    broadcastDocumentsUpdate('folder_delete', { folderId });
     res.status(204).end();
   } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
     logger.error('FOLDER_DELETE_ERROR', { message: err.message });
     res.status(500).json({ error: 'Nepodarilo sa vymazať priečinok. Skúste prosím neskôr.' });
+  } finally {
+    client.release();
   }
 });
 
