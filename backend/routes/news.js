@@ -69,9 +69,9 @@ async function replaceAttachments(newsId, attachments) {
   await query('DELETE FROM news_attachments WHERE news_id = $1', [newsId]);
   for (const att of attachments) {
     await query(
-      `INSERT INTO news_attachments (news_id, name, file_url, file_size, mime_type)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [newsId, att.name, att.url, att.size || null, att.mime_type || null]
+      `INSERT INTO news_attachments (news_id, name, file_url, file_size, mime_type, folder_id)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [newsId, att.name, att.url, att.size || null, att.mime_type || null, att.folder_id || null]
     );
   }
 }
@@ -93,7 +93,7 @@ router.get('/', requireAuth, async (req, res) => {
               COALESCE(
                 (SELECT json_agg(json_build_object(
                    'id', a.id, 'name', a.name, 'url', a.file_url,
-                   'size', a.file_size, 'mime_type', a.mime_type
+                   'size', a.file_size, 'mime_type', a.mime_type, 'folder_id', a.folder_id
                  ) ORDER BY a.id)
                  FROM news_attachments a WHERE a.news_id = n.id),
                 '[]'::json
@@ -347,7 +347,7 @@ router.get('/:id', requireAuth, async (req, res) => {
       `SELECT n.*, COALESCE(
           (SELECT json_agg(json_build_object(
              'id', a.id, 'name', a.name, 'url', a.file_url,
-             'size', a.file_size, 'mime_type', a.mime_type
+             'size', a.file_size, 'mime_type', a.mime_type, 'folder_id', a.folder_id
            ) ORDER BY a.id)
            FROM news_attachments a WHERE a.news_id = n.id),
           '[]'::json
@@ -399,7 +399,7 @@ router.post('/', requireAuth, async (req, res) => {
       `SELECT n.*, COALESCE(
           (SELECT json_agg(json_build_object(
              'id', a.id, 'name', a.name, 'url', a.file_url,
-             'size', a.file_size, 'mime_type', a.mime_type
+             'size', a.file_size, 'mime_type', a.mime_type, 'folder_id', a.folder_id
            ) ORDER BY a.id)
            FROM news_attachments a WHERE a.news_id = n.id),
           '[]'::json
@@ -478,7 +478,7 @@ router.patch('/:id', requireAuth, async (req, res) => {
       `SELECT n.*, COALESCE(
           (SELECT json_agg(json_build_object(
              'id', a.id, 'name', a.name, 'url', a.file_url,
-             'size', a.file_size, 'mime_type', a.mime_type
+             'size', a.file_size, 'mime_type', a.mime_type, 'folder_id', a.folder_id
            ) ORDER BY a.id)
            FROM news_attachments a WHERE a.news_id = n.id),
           '[]'::json

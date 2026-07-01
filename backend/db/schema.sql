@@ -101,6 +101,7 @@ CREATE TABLE IF NOT EXISTS news_attachments (
   file_url    VARCHAR(2048) NOT NULL,
   file_size   BIGINT,
   mime_type   VARCHAR(120),
+  folder_id   INTEGER REFERENCES doc_folders(id) ON DELETE SET NULL,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

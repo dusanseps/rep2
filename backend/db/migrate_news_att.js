@@ -11,8 +11,13 @@ const { pool } = require('./index');
         file_url VARCHAR(2048) NOT NULL,
         file_size BIGINT,
         mime_type VARCHAR(120),
+        folder_id INTEGER REFERENCES doc_folders(id) ON DELETE SET NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
+    `);
+    await pool.query(`
+      ALTER TABLE news_attachments
+      ADD COLUMN IF NOT EXISTS folder_id INTEGER REFERENCES doc_folders(id) ON DELETE SET NULL
     `);
     await pool.query('CREATE INDEX IF NOT EXISTS idx_news_att ON news_attachments (news_id)');
     console.log('news_attachments OK');

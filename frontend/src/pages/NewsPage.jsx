@@ -15,9 +15,49 @@ import NewsComments from '../components/news/NewsComments.jsx';
 
 const API = import.meta.env.VITE_API_BASE || '/api';
 
+function getNewsAttachmentFolderId(att) {
+  const direct = Number(att?.folder_id);
+  if (Number.isInteger(direct) && direct > 0) return String(direct);
+
+  const url = String(att?.url || att?.file_url || '');
+  const match = url.match(/\/uploads\/documents\/([^/]+)\//i);
+  const segment = match?.[1] || '';
+  const idFromSlug = segment.match(/-(\d+)$/)?.[1] || segment.match(/^(\d+)$/)?.[1];
+  return idFromSlug || null;
+}
+
+function getNewsAttachmentName(att) {
+  const direct = String(att?.name || '').trim();
+  if (direct) return direct;
+
+  const rawUrl = String(att?.url || att?.file_url || '').trim();
+  if (!rawUrl) return 'priloha';
+  try {
+    return decodeURIComponent(rawUrl.split('/').filter(Boolean).pop() || 'priloha');
+  } catch (_err) {
+    return rawUrl.split('/').filter(Boolean).pop() || 'priloha';
+  }
+}
+
+function getNewsAttachmentUrl(att) {
+  const raw = String(att?.url || att?.file_url || '').trim();
+  if (!raw) return '';
+  if (raw.startsWith('/')) return raw;
+  if (/^https?:\/\//i.test(raw)) return raw;
+  return '';
+}
+
 // ── detail novinky v modale podľa query parametra view ───────────────
 function NewsDetailModal({ id, onClose }) {
   const [news] = createResource(id, fetchNewsById);
+  const navigate = useNavigate();
+
+  function openAttachmentInDocuments(att) {
+    const folderId = getNewsAttachmentFolderId(att);
+    if (!folderId) return;
+    navigate(`/dokumenty?folder=${folderId}`);
+  }
+
   return (
     <Show when={news()}>
       <div class="rep-overlay" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
@@ -46,6 +86,42 @@ function NewsDetailModal({ id, onClose }) {
             }>
               <div style={{ 'font-size': '14px', color: '#475569', 'line-height': '1.75', 'white-space': 'pre-wrap' }}>{news().content}</div>
             </Show>
+            <Show when={(news().attachments || []).length > 0}>
+              <div style={{ display: 'flex', gap: '8px', 'flex-wrap': 'wrap', 'margin-top': '18px' }}>
+                <For each={news().attachments || []}>
+                  {(att) => {
+                    const folderId = getNewsAttachmentFolderId(att);
+                    const fileUrl = getNewsAttachmentUrl(att);
+                    if (!folderId && !fileUrl) return null;
+                    return (
+                      <Show
+                        when={folderId}
+                        fallback={
+                          <a
+                            class="news-attachment-badge"
+                            href={fileUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={`Otvoriť prílohu: ${getNewsAttachmentName(att)}`}
+                          >
+                            {getNewsAttachmentName(att)}
+                          </a>
+                        }
+                      >
+                        <button
+                          type="button"
+                          class="news-attachment-badge"
+                          title={`Otvoriť v Dokumentoch: ${getNewsAttachmentName(att)}`}
+                          onClick={() => openAttachmentInDocuments(att)}
+                        >
+                          {getNewsAttachmentName(att)}
+                        </button>
+                      </Show>
+                    );
+                  }}
+                </For>
+              </div>
+            </Show>
             {/* Komentáre pod novinkou */}
             <div style={{ 'margin-top': '32px', 'border-top': '1px solid #e2e8f0', 'padding-top': '24px' }}>
               <NewsComments newsId={news().id} />
@@ -73,7 +149,7 @@ function timeAgo(date) {
 
 // ── karta novinky ────────────────────────────────────────────────────────────
 
-function NewsCard({ item, canEdit, onEdit, onDelete, onView }) {
+function NewsCard({ item, canEdit, onEdit, onDelete, onView, onOpenAttachment }) {
   return (
     <article class="news-page-card">
       <Show when={item.imageUrl}>
@@ -91,6 +167,42 @@ function NewsCard({ item, canEdit, onEdit, onDelete, onView }) {
         <h2 class="news-page-card__title" style={{ cursor: 'pointer' }} onClick={onView}>{item.title}</h2>
         <Show when={item.description}>
           <p class="news-page-card__desc">{item.description}</p>
+        </Show>
+        <Show when={(item.attachments || []).length > 0}>
+          <div style={{ display: 'flex', gap: '6px', 'flex-wrap': 'wrap', 'margin-bottom': '8px' }}>
+            <For each={item.attachments || []}>
+              {(att) => {
+                const folderId = getNewsAttachmentFolderId(att);
+                const fileUrl = getNewsAttachmentUrl(att);
+                if (!folderId && !fileUrl) return null;
+                return (
+                  <Show
+                    when={folderId}
+                    fallback={
+                      <a
+                        class="news-attachment-badge"
+                        href={fileUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={`Otvoriť prílohu: ${getNewsAttachmentName(att)}`}
+                      >
+                        {getNewsAttachmentName(att)}
+                      </a>
+                    }
+                  >
+                    <button
+                      type="button"
+                      class="news-attachment-badge"
+                      title={`Otvoriť v Dokumentoch: ${getNewsAttachmentName(att)}`}
+                      onClick={() => onOpenAttachment?.(att)}
+                    >
+                      {getNewsAttachmentName(att)}
+                    </button>
+                  </Show>
+                );
+              }}
+            </For>
+          </div>
         </Show>
         <div class="news-page-card__footer">
           <span class="news-card__meta">
@@ -230,6 +342,7 @@ function NewsForm({ item, onSave, onClose }) {
               url: data.file_url,
               size: data.file_size,
               mime_type: data.mime_type,
+              folder_id: data.folder_id,
             }]);
             uploaded++;
             done = true;
@@ -277,6 +390,7 @@ function NewsForm({ item, onSave, onClose }) {
                 url: data.file_url,
                 size: data.file_size,
                 mime_type: data.mime_type,
+                folder_id: data.folder_id,
               }]);
               overwritten++;
             } else {
@@ -586,6 +700,10 @@ export default function NewsPage() {
                     item={item}
                     canEdit={user()?.role === 'admin' || String(item.createdById) === String(userId())}
                     onView={() => navigate(`/novinky?view=${item.id}`)}
+                    onOpenAttachment={(att) => {
+                      const folderId = getNewsAttachmentFolderId(att);
+                      if (folderId) navigate(`/dokumenty?folder=${folderId}`);
+                    }}
                     onEdit={() => setEditing(item)}
                     onDelete={() => setToDelete(item.id)}
                   />
